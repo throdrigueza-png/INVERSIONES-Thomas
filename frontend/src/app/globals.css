@@ -1,0 +1,60 @@
+@import "tailwindcss";
+
+:root {
+  --background: #05050A;
+  /* Negro abismal de las imágenes */
+  --foreground: #ffffff;
+  --neon-cyan: #00f0ff;
+  /* Azul/Cyan futurista */
+  --neon-magenta: #ff0055;
+  /* Rojo/Magenta de "No Stonks" */
+  --accent-purple: #7000ff;
+}
+
+@layer base {
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    @apply antialiased font-mono tracking-wider;
+    background-image:
+      radial-gradient(circle at 15% 50%, rgba(0, 240, 255, 0.03), transparent 25%),
+      radial-gradient(circle at 85% 30%, rgba(112, 0, 255, 0.04), transparent 25%);
+  }
+}
+
+/* Scrollbar Hacker Arreglada (SIN ERRORES) */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 240, 255, 0.2);
+  border-radius: 10px;
+  transition: all 0.3s ease;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(0, 240, 255, 0.8);
+  /* Arreglado el error de sintaxis aquí: */
+  filter: drop-shadow(0 0 8px var(--neon-cyan));
+}
+
+/* Efectos de Texto Cyberpunk */
+.text-glow-cyan {
+  text-shadow: 0 0 10px rgba(0, 240, 255, 0.7), 0 0 20px rgba(0, 240, 255, 0.4);
+}
+
+.text-glow-magenta {
+  text-shadow: 0 0 10px rgba(255, 0, 85, 0.7), 0 0 20px rgba(255, 0, 85, 0.4);
+}
+
+/* Grid de fondo tipo Matrix/Bolsa */
+.bg-grid-pattern {
+  background-size: 40px 40px;
+  background-image: linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+}

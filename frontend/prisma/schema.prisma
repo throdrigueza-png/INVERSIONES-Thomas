@@ -1,0 +1,58 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql" // Ojo: Ya no va la línea de "url =" aquí.
+}
+
+// ==========================================
+// 1. TU PERFIL Y BILLETERA LÍQUIDA
+// ==========================================
+model UserProfile {
+  id            String   @id @default(uuid())
+  liquidBalance Float    @default(0) // Tu plata intocable a la mano
+  updatedAt     DateTime @updatedAt
+}
+
+// ==========================================
+// 2. HISTORIAL DE GASTOS HORMIGA / INGRESOS
+// ==========================================
+model WalletTransaction {
+  id          String   @id @default(uuid())
+  amount      Float
+  type        String   // "IN" o "OUT"
+  description String
+  date        DateTime @default(now())
+}
+
+// ==========================================
+// 3. FONDOS DE INVERSIÓN (Pasivas/Activas)
+// ==========================================
+model Investment {
+  id            String   @id @default(uuid())
+  name          String
+  category      String   // "PASIVA" o "ACTIVA"
+  color         String
+  initialAmount Float
+  currentAmount Float
+  minBalance    Float    @default(0)
+  isLiquid      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  
+  // Relación: Una inversión tiene muchos puntos en el historial (Gráficas)
+  history       InvestmentHistory[] 
+}
+
+// ==========================================
+// 4. HISTORIAL DE RENTABILIDAD (Para las gráficas)
+// ==========================================
+model InvestmentHistory {
+  id           String     @id @default(uuid())
+  investmentId String
+  investment   Investment @relation(fields: [investmentId], references: [id], onDelete: Cascade)
+  value        Float
+  date         DateTime   @default(now())
+}
