@@ -284,7 +284,7 @@ export default function NexusWallstreetSaaS() {
               <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
               <XAxis dataKey="name" stroke="#ffffff30" fontSize={10} />
               <YAxis stroke="#ffffff30" fontSize={10} tickFormatter={(val) => `$${val / 1000}k`} />
-              <RechartsTooltip contentStyle={{ backgroundColor: '#05050A', borderColor: '#333' }} formatter={(val: number) => `$${val.toLocaleString()}`} />
+              <RechartsTooltip contentStyle={{ backgroundColor: '#05050A', borderColor: '#333' }} formatter={(val) => `$${(val as number)?.toLocaleString() ?? String(val)}`} />
               <Area type="monotone" dataKey="neto" stroke="#00f0ff" fillOpacity={1} fill="url(#colorNeto)" name="Capital Neto" />
               <Area type="monotone" dataKey="gastos" stroke="#ff0055" fillOpacity={1} fill="url(#colorGastos)" name="Gastos/Hormiga" />
             </AreaChart>
@@ -336,7 +336,7 @@ export default function NexusWallstreetSaaS() {
               </Pie>
               <RechartsTooltip
                 contentStyle={{ backgroundColor: '#05050A', borderColor: '#333', fontSize: '12px' }}
-                formatter={(val: number) => `$${val.toLocaleString()}`}
+                formatter={(val) => `$${(val as number)?.toLocaleString() ?? String(val)}`}
               />
             </PieChart>
           </ResponsiveContainer>
@@ -462,14 +462,16 @@ export default function NexusWallstreetSaaS() {
                         />
                       </div>
                       <button
-                        onClick={() => handleUpdateInvestmentAmount(inv.id, Number(invUpdateAmounts[inv.id] || 50000), "ADD")}
-                        className="flex-1 bg-[#00ffaa]/10 text-[#00ffaa] border border-[#00ffaa]/30 text-[10px] py-1.5 rounded flex items-center justify-center gap-1"
+                        disabled={!invUpdateAmounts[inv.id] || Number(invUpdateAmounts[inv.id]) <= 0}
+                        onClick={() => handleUpdateInvestmentAmount(inv.id, Number(invUpdateAmounts[inv.id]), "ADD")}
+                        className="flex-1 bg-[#00ffaa]/10 text-[#00ffaa] border border-[#00ffaa]/30 text-[10px] py-1.5 rounded flex items-center justify-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         <Plus size={10} /> Inyectar
                       </button>
                       <button
-                        onClick={() => handleUpdateInvestmentAmount(inv.id, Number(invUpdateAmounts[inv.id] || 50000), "WITHDRAW")}
-                        className="flex-1 bg-[#ff0055]/10 text-[#ff0055] border border-[#ff0055]/30 text-[10px] py-1.5 rounded flex items-center justify-center gap-1"
+                        disabled={!invUpdateAmounts[inv.id] || Number(invUpdateAmounts[inv.id]) <= 0}
+                        onClick={() => handleUpdateInvestmentAmount(inv.id, Number(invUpdateAmounts[inv.id]), "WITHDRAW")}
+                        className="flex-1 bg-[#ff0055]/10 text-[#ff0055] border border-[#ff0055]/30 text-[10px] py-1.5 rounded flex items-center justify-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         <Minus size={10} /> Retirar
                       </button>
@@ -478,7 +480,7 @@ export default function NexusWallstreetSaaS() {
                       <ResponsiveContainer width="100%" height="100%">
                         <LineChart data={inv.history.length > 0 ? inv.history : [{ date: 'Inicio', value: inv.initialAmount }, { date: 'Hoy', value: inv.currentAmount }]}>
                           <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
-                          <RechartsTooltip contentStyle={{ backgroundColor: '#05050A', borderColor: '#333', fontSize: '12px' }} formatter={(val: number) => `$${val.toLocaleString()}`} />
+                          <RechartsTooltip contentStyle={{ backgroundColor: '#05050A', borderColor: '#333', fontSize: '12px' }} formatter={(val) => `$${(val as number)?.toLocaleString() ?? String(val)}`} />
                           <Line type="monotone" dataKey="value" stroke={inv.color} strokeWidth={2} dot={{ r: 3, fill: inv.color }} />
                         </LineChart>
                       </ResponsiveContainer>
@@ -501,7 +503,7 @@ export default function NexusWallstreetSaaS() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
                 <XAxis dataKey="name" stroke="#ffffff30" fontSize={10} />
                 <YAxis stroke="#ffffff30" fontSize={10} tickFormatter={(val) => `$${val / 1000}k`} />
-                <RechartsTooltip contentStyle={{ backgroundColor: '#05050A', borderColor: '#333' }} cursor={{ fill: '#ffffff05' }} formatter={(val: number) => `$${val.toLocaleString()}`} />
+                <RechartsTooltip contentStyle={{ backgroundColor: '#05050A', borderColor: '#333' }} cursor={{ fill: '#ffffff05' }} formatter={(val) => `$${(val as number)?.toLocaleString() ?? String(val)}`} />
                 <Bar dataKey="rentabilidad" radius={[4, 4, 0, 0]}>
                   {comparativeData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={entry.fill} />
@@ -648,7 +650,7 @@ export default function NexusWallstreetSaaS() {
           </div>
         ) : (
           filteredCatalog.map(asset => {
-            const alreadyInPortfolio = investments.some(inv => inv.name.includes(asset.symbol) || inv.name === asset.name);
+            const alreadyInPortfolio = investments.some(inv => inv.name.includes(`(${asset.symbol})`));
             return (
               <motion.div
                 key={asset.symbol}
