@@ -17,6 +17,7 @@ import {
   createInvestment,
   updateInvestment,
   deleteInvestment,
+  updateInvestmentColor,
 } from "@/app/actions";
 
 // ==========================================
@@ -106,13 +107,7 @@ export default function NexusWallstreetSaaS() {
   // ==========================================
   // 📊 4. ESTADOS: "INVERSIONES"
   // ==========================================
-  const [investments, setInvestments] = useState<Investment[]>([
-    {
-      id: "daf-1", name: "Dafuturo Davivienda", category: "PASIVA", color: "#ff0055",
-      initialAmount: 500000, currentAmount: 505000, minBalance: 200000, isLiquid: true,
-      history: [{ date: '2023-01-01', value: 500000 }, { date: '2023-02-01', value: 505000 }]
-    }
-  ]);
+  const [investments, setInvestments] = useState<Investment[]>([]);
 
   // Controles del Módulo de Inversiones (FAB y Modal)
   const [isFabOpen, setIsFabOpen] = useState(false);
@@ -282,6 +277,14 @@ export default function NexusWallstreetSaaS() {
       } catch (e: unknown) {
         alert(e instanceof Error ? e.message : "Error eliminando inversión");
       }
+    }
+  };
+
+  const handleColorChange = async (invId: string, color: string) => {
+    try {
+      await updateInvestmentColor(invId, color);
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : "Error actualizando color");
     }
   };
 
@@ -577,6 +580,19 @@ export default function NexusWallstreetSaaS() {
                         </LineChart>
                       </ResponsiveContainer>
                     </div>
+                    <div className="flex items-center justify-between mt-3 pt-3 border-t border-white/5">
+                      <span className="text-[9px] text-gray-500 uppercase">Color del Fondo</span>
+                      <input
+                        type="color"
+                        defaultValue={inv.color}
+                        onBlur={(e) => {
+                          const newColor = e.target.value;
+                          setInvestments(prev => prev.map(i => i.id === inv.id ? { ...i, color: newColor } : i));
+                          handleColorChange(inv.id, newColor);
+                        }}
+                        className="w-8 h-8 rounded-md cursor-pointer p-0.5 bg-[#05050A] border border-white/10"
+                      />
+                    </div>
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -608,7 +624,7 @@ export default function NexusWallstreetSaaS() {
       )}
 
       {/* BOTÓN FLOTANTE (FAB) PARA NUEVA INVERSIÓN */}
-      <div className="fixed bottom-8 right-8 z-50 flex flex-col items-end gap-3">
+      <div className="fixed bottom-20 sm:bottom-8 right-8 z-50 flex flex-col items-end gap-3">
         <AnimatePresence>
           {isFabOpen && (
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} className="flex flex-col gap-2 items-end">
@@ -873,38 +889,38 @@ export default function NexusWallstreetSaaS() {
     <div className="flex h-screen bg-[#05050A] text-white font-mono overflow-hidden selection:bg-[#00f0ff] selection:text-black">
 
       {/* 🔮 SIDEBAR (Navegación entre los 3 grandes módulos) */}
-      <nav className="w-20 md:w-64 border-r border-white/5 bg-[#0A0A16]/50 p-4 z-20 flex flex-col gap-6">
-        <div className="flex items-center gap-3 justify-center md:justify-start mb-8">
+      <nav className="hidden sm:flex flex-col w-64 border-r border-white/5 bg-[#0A0A16]/50 p-4 z-20 gap-6">
+        <div className="flex items-center gap-3 mb-8">
           <div className="w-8 h-8 rounded bg-gradient-to-br from-[#00f0ff] to-[#7000ff] flex items-center justify-center font-bold text-black">N</div>
-          <span className="hidden md:block font-bold tracking-widest uppercase text-sm">Nexus SaaS</span>
+          <span className="font-bold tracking-widest uppercase text-sm">Nexus SaaS</span>
         </div>
 
         <div className="flex flex-col gap-2">
           <button onClick={() => setActiveTab("mi_estado")} className={`flex items-center gap-3 p-3 rounded-xl transition-all ${activeTab === "mi_estado" ? "bg-[#00f0ff]/10 text-[#00f0ff] border border-[#00f0ff]/30" : "text-gray-500 hover:bg-white/5 hover:text-white"}`}>
             <Activity size={18} />
-            <span className="hidden md:block text-xs font-bold uppercase tracking-widest">Mi Estado</span>
+            <span className="text-xs font-bold uppercase tracking-widest">Mi Estado</span>
           </button>
 
           <button onClick={() => setActiveTab("inversiones")} className={`flex items-center gap-3 p-3 rounded-xl transition-all ${activeTab === "inversiones" ? "bg-[#ff0055]/10 text-[#ff0055] border border-[#ff0055]/30" : "text-gray-500 hover:bg-white/5 hover:text-white"}`}>
             <PieChartIcon size={18} />
-            <span className="hidden md:block text-xs font-bold uppercase tracking-widest">Inversiones</span>
+            <span className="text-xs font-bold uppercase tracking-widest">Inversiones</span>
           </button>
 
           <button onClick={() => setActiveTab("search")} className={`flex items-center gap-3 p-3 rounded-xl transition-all ${activeTab === "search" ? "bg-[#7000ff]/10 text-[#7000ff] border border-[#7000ff]/30" : "text-gray-500 hover:bg-white/5 hover:text-white"}`}>
             <Search size={18} />
-            <span className="hidden md:block text-xs font-bold uppercase tracking-widest">Search ETF</span>
+            <span className="text-xs font-bold uppercase tracking-widest">Search ETF</span>
           </button>
 
           {/* Asistente IA */}
           <button onClick={() => setIsChatOpen(true)} className={`flex items-center gap-3 p-3 rounded-xl transition-all text-gray-500 hover:bg-white/5 hover:text-white`}>
             <MessageSquare size={18} />
-            <span className="hidden md:block text-xs font-bold uppercase tracking-widest">Asesor IA</span>
+            <span className="text-xs font-bold uppercase tracking-widest">Asesor IA</span>
           </button>
         </div>
 
         {/* Perfil y Logout */}
         <div className="mt-auto flex flex-col gap-2">
-          <div className="hidden md:flex items-center gap-2 p-2 rounded-xl bg-white/5 border border-white/5">
+          <div className="flex items-center gap-2 p-2 rounded-xl bg-white/5 border border-white/5">
             {session?.user?.image && (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={session.user.image} alt="avatar" className="w-7 h-7 rounded-full" />
@@ -919,7 +935,7 @@ export default function NexusWallstreetSaaS() {
             className="flex items-center gap-3 p-3 rounded-xl transition-all text-gray-500 hover:bg-[#ff0055]/10 hover:text-[#ff0055]"
           >
             <LogOut size={18} />
-            <span className="hidden md:block text-xs font-bold uppercase tracking-widest">Salir</span>
+            <span className="text-xs font-bold uppercase tracking-widest">Salir</span>
           </button>
         </div>
       </nav>
@@ -928,19 +944,19 @@ export default function NexusWallstreetSaaS() {
       <main className="flex-1 flex flex-col h-full relative overflow-y-auto custom-scrollbar">
 
         {/* TOPBAR: EL CAPITAL NETO INTOCABLE */}
-        <header className="sticky top-0 z-10 bg-[#05050A]/80 backdrop-blur-md border-b border-white/5 p-6 flex justify-between items-center">
-          <div>
+        <header className="sticky top-0 z-10 bg-[#05050A]/80 backdrop-blur-md border-b border-white/5 px-4 py-3 sm:p-6 flex justify-between items-center">
+          <div className="hidden sm:block">
             <h1 className="text-sm text-gray-400 uppercase tracking-widest">Panel de Control</h1>
             <p className="text-xs text-gray-600">Sincronizado con Azure DB</p>
           </div>
 
           {/* AQUÍ ESTÁ EL TOTAL: Suma de la billetera + inversiones */}
-          <div className="text-right">
+          <div className="text-right sm:ml-auto">
             <h2 className="text-[10px] text-gray-500 uppercase tracking-widest">Capital Neto (Intocable)</h2>
             {isDataLoading ? (
               <Loader2 size={28} className="text-[#00f0ff] animate-spin ml-auto mt-1" />
             ) : (
-              <p className="text-3xl md:text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-[#00f0ff] to-[#7000ff]">
+              <p className="text-2xl sm:text-3xl md:text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-[#00f0ff] to-[#7000ff]">
                 ${NET_CAPITAL.toLocaleString()}
               </p>
             )}
@@ -948,7 +964,7 @@ export default function NexusWallstreetSaaS() {
         </header>
 
         {/* ÁREA DE RENDERIZADO DINÁMICO */}
-        <div className="p-6 md:p-10">
+        <div className="p-4 sm:p-6 md:p-10 pb-24 sm:pb-10">
           {activeTab === "mi_estado" && renderMiEstado()}
           {activeTab === "inversiones" && renderInversiones()}
           {activeTab === "search" && renderSearch()}
@@ -1038,6 +1054,38 @@ export default function NexusWallstreetSaaS() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* 📱 BOTTOM NAV (Mobile only — sm and below) */}
+      <nav className="sm:hidden fixed bottom-0 left-0 right-0 bg-[#0A0A16]/95 backdrop-blur-md border-t border-white/10 flex justify-around items-center py-2 z-40">
+        <button
+          onClick={() => setActiveTab("mi_estado")}
+          className={`flex flex-col items-center gap-1 px-4 py-1 rounded-xl transition-all ${activeTab === "mi_estado" ? "text-[#00f0ff]" : "text-gray-500"}`}
+        >
+          <Activity size={20} />
+          <span className="text-[9px] uppercase tracking-widest">Estado</span>
+        </button>
+        <button
+          onClick={() => setActiveTab("inversiones")}
+          className={`flex flex-col items-center gap-1 px-4 py-1 rounded-xl transition-all ${activeTab === "inversiones" ? "text-[#ff0055]" : "text-gray-500"}`}
+        >
+          <PieChartIcon size={20} />
+          <span className="text-[9px] uppercase tracking-widest">Fondos</span>
+        </button>
+        <button
+          onClick={() => setActiveTab("search")}
+          className={`flex flex-col items-center gap-1 px-4 py-1 rounded-xl transition-all ${activeTab === "search" ? "text-[#7000ff]" : "text-gray-500"}`}
+        >
+          <Search size={20} />
+          <span className="text-[9px] uppercase tracking-widest">ETF</span>
+        </button>
+        <button
+          onClick={() => setIsChatOpen(true)}
+          className="flex flex-col items-center gap-1 px-4 py-1 rounded-xl transition-all text-gray-500"
+        >
+          <MessageSquare size={20} />
+          <span className="text-[9px] uppercase tracking-widest">IA</span>
+        </button>
+      </nav>
 
     </div>
   );
