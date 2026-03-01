@@ -50,18 +50,21 @@ ${investments.map((i) => `  * ${i.name} (${i.category}): Invertido $${i.initialA
 `;
 
   // 3. Llamar al proveedor de IA con el contexto financiero
-  if (!process.env.OPENAI_API_KEY) {
+  if (!process.env.XAI_API_KEY) {
     return NextResponse.json(
       {
-        reply: `Hola ${session.user.name ?? 'usuario'}! Soy tu asesor financiero IA. Actualmente no tengo acceso a un proveedor de IA configurado (falta OPENAI_API_KEY), pero puedo ver tu contexto financiero:\n\n${financialContext}\n\nConfigura tu OPENAI_API_KEY en .env para respuestas inteligentes.`,
+        reply: `Hola ${session.user.name ?? 'usuario'}! Soy tu asesor financiero IA. Actualmente no tengo acceso a un proveedor de IA configurado (falta XAI_API_KEY), pero puedo ver tu contexto financiero:\n\n${financialContext}\n\nConfigura tu XAI_API_KEY en .env para respuestas inteligentes.`,
       }
     );
   }
 
-  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const grokClient = new OpenAI({
+    apiKey: process.env.XAI_API_KEY,
+    baseURL: 'https://api.x.ai/v1',
+  });
 
-  const completion = await openai.chat.completions.create({
-    model: 'gpt-4o-mini',
+  const completion = await grokClient.chat.completions.create({
+    model: 'grok-3-mini',
     messages: [
       {
         role: 'system',
