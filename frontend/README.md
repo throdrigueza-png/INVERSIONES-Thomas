@@ -1,5 +1,35 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Environment Variables
+
+Copy `.env.example` to `.env` and fill in the values below. **Never commit `.env`.**
+
+| Variable | Description | Where to get it |
+|---|---|---|
+| `DATABASE_URL` | PostgreSQL connection string | [Neon](https://neon.tech) or any Postgres provider |
+| `GOOGLE_CLIENT_ID` | Google OAuth Client ID | [Google Cloud Console](https://console.cloud.google.com/) → APIs & Services → Credentials → Create OAuth 2.0 Client ID |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth Client Secret | Same page as above |
+| `NEXTAUTH_SECRET` | Random secret for NextAuth session encryption | Run `openssl rand -base64 32` in your terminal |
+| `NEXTAUTH_URL` | Public URL of the app (e.g. `http://localhost:3000`) | Your deployment URL |
+| `XAI_API_KEY` | xAI (Grok) API key for the chatbot | [xAI Console](https://console.x.ai/) |
+
+### Google OAuth setup
+
+1. Go to <https://console.cloud.google.com/> and create (or select) a project.
+2. Enable the **Google+ API** (or "Google Identity").
+3. Go to **APIs & Services → Credentials → Create Credentials → OAuth client ID**.
+4. Application type: **Web application**.
+5. Add the following **Authorized redirect URIs**:
+   - `http://localhost:3000/api/auth/callback/google` (development)
+   - `https://<your-domain>/api/auth/callback/google` (production)
+6. Copy the **Client ID** → `GOOGLE_CLIENT_ID` and **Client Secret** → `GOOGLE_CLIENT_SECRET`.
+
+### Grok (xAI) setup
+
+1. Go to <https://console.x.ai/> and sign in.
+2. Create an API key.
+3. Copy it → `XAI_API_KEY`.
+
 ## Getting Started
 
 First, run the development server:

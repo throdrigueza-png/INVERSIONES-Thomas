@@ -201,6 +201,23 @@ export async function updateInvestment(data: {
 }
 
 // ==========================================
+// PUT: Actualizar color de inversión
+// ==========================================
+export async function updateInvestmentColor(investmentId: string, color: string) {
+  const userId = await getAuthUserId();
+
+  const investment = await prisma.investment.findFirst({
+    where: { id: investmentId, userId },
+  });
+  if (!investment) throw new Error('Inversión no encontrada');
+
+  await prisma.investment.update({
+    where: { id: investmentId },
+    data: { color },
+  });
+}
+
+// ==========================================
 // DELETE: Cerrar inversión (devuelve saldo a billetera)
 // ==========================================
 export async function deleteInvestment(investmentId: string) {
