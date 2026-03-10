@@ -65,8 +65,7 @@ ${investments.map((i) => `  * ${i.name} (${i.category}): Invertido $${i.initialA
     });
 
     const completion = await grokClient.chat.completions.create({
-      // Use 'grok-beta' — the stable xAI model identifier. 'grok-3-mini' is not a valid model and causes a 404 from the xAI API.
-      model: 'grok-beta',
+      model: 'grok-2-latest',
       messages: [
         {
           role: 'system',
