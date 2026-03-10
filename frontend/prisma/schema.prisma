@@ -106,12 +106,15 @@ model Investment {
 }
 
 // ==========================================
-// 4. HISTORIAL DE RENTABILIDAD (Para las gráficas)
+// 4. HISTORIAL DE RENTABILIDAD (Para las gráficas y deshacer)
 // ==========================================
 model InvestmentHistory {
   id           String     @id @default(uuid())
   investmentId String
   investment   Investment @relation(fields: [investmentId], references: [id], onDelete: Cascade)
   value        Float
+  type         String     @default("SNAPSHOT") // SNAPSHOT | ADD | WITHDRAW | RETURN
+  delta        Float      @default(0)          // Cambio en currentAmount (negativo si fue pérdida en RETURN)
+  deltaInitial Float      @default(0)          // Cambio real en initialAmount (puede ser menor que delta en WITHDRAW)
   date         DateTime   @default(now())
 }
