@@ -123,7 +123,7 @@ export async function createInvestment(data: {
         isLiquid: data.isLiquid,
         minBalance: data.minBalance,
         history: {
-          create: { value: data.initialAmount },
+          create: { value: data.initialAmount, type: 'SNAPSHOT', delta: data.initialAmount, deltaInitial: data.initialAmount },
         },
       },
       include: { history: true },
@@ -204,7 +204,10 @@ export async function updateInvestment(data: {
     if (data.amount > newInvestmentAmount) {
       throw new Error('No puedes retirar más de lo que tiene la inversión.');
     }
+    // deltaInitial tracks the ACTUAL reduction in initialAmount (capped so it doesn't go negative)
+    const actualInitialReduction = Math.min(data.amount, newInitialAmount);
     newInvestmentAmount -= data.amount;
+    newInitialAmount -= actualInitialReduction;
     newLiquidBalance += data.amount;
   } else if (data.type === 'RETURN') {
     // Solo modifica el valor actual (ganancia/pérdida), no afecta la billetera
@@ -220,16 +223,22 @@ export async function updateInvestment(data: {
     newLiquidBalance -= data.amount;
   }
 
+  // Compute deltaInitial: how much initialAmount actually changed for this operation
+  const deltaInitial =
+    data.type === 'ADD' ? data.amount :
+    data.type === 'WITHDRAW' ? Math.min(data.amount, investment.initialAmount) :
+    0; // RETURN does not affect initialAmount
+
   const investmentUpdateData =
-    data.type === 'ADD'
+    data.type === 'RETURN'
       ? {
-          initialAmount: newInitialAmount,
           currentAmount: newInvestmentAmount,
-          history: { create: { value: newInvestmentAmount } },
+          history: { create: { value: newInvestmentAmount, type: data.type, delta: data.amount, deltaInitial } },
         }
       : {
+          initialAmount: newInitialAmount,
           currentAmount: newInvestmentAmount,
-          history: { create: { value: newInvestmentAmount } },
+          history: { create: { value: newInvestmentAmount, type: data.type, delta: data.amount, deltaInitial } },
         };
 
   const [updatedProfile, updatedInvestment] = await prisma.$transaction([
@@ -290,4 +299,65 @@ export async function deleteInvestment(investmentId: string) {
   ]);
 
   return { liquidBalance: profile.liquidBalance + investment.currentAmount };
+}
+
+// ==========================================
+// DELETE: Deshacer un movimiento del historial de inversión
+// ==========================================
+export async function deleteInvestmentHistory(historyId: string) {
+  const userId = await getAuthUserId();
+
+  const historyEntry = await prisma.investmentHistory.findFirst({
+    where: { id: historyId },
+    include: { investment: true },
+  });
+
+  if (!historyEntry) throw new Error('Movimiento no encontrado');
+  if (historyEntry.investment.userId !== userId) throw new Error('No autorizado');
+  if (historyEntry.type === 'SNAPSHOT') {
+    throw new Error('No puedes deshacer la creación inicial. Para cerrar la inversión usa el botón de eliminar.');
+  }
+
+  const investment = historyEntry.investment;
+  const profile = await prisma.userProfile.findUnique({ where: { userId } });
+  if (!profile) throw new Error('Perfil no encontrado');
+
+  let newCurrentAmount = investment.currentAmount;
+  let newInitialAmount = investment.initialAmount;
+  let newLiquidBalance = profile.liquidBalance;
+
+  if (historyEntry.type === 'ADD') {
+    // Deshacer depósito: quitar del fondo y del capital invertido, devolver a billetera
+    newCurrentAmount -= historyEntry.delta;
+    newInitialAmount -= historyEntry.deltaInitial;
+    newLiquidBalance += historyEntry.delta;
+  } else if (historyEntry.type === 'WITHDRAW') {
+    // Deshacer retiro: devolver al fondo y al capital invertido, quitar de billetera
+    newCurrentAmount += historyEntry.delta;
+    newInitialAmount += historyEntry.deltaInitial;
+    newLiquidBalance -= historyEntry.delta;
+  } else if (historyEntry.type === 'RETURN') {
+    // Deshacer rendimiento: revertir el delta del valor actual (delta puede ser negativo)
+    newCurrentAmount -= historyEntry.delta;
+    if (newCurrentAmount < 0) newCurrentAmount = 0;
+    // liquidBalance y initialAmount no cambian con rendimientos
+  }
+
+  const [, updatedProfile, updatedInvestment] = await prisma.$transaction([
+    prisma.investmentHistory.delete({ where: { id: historyId } }),
+    prisma.userProfile.update({
+      where: { userId },
+      data: { liquidBalance: newLiquidBalance },
+    }),
+    prisma.investment.update({
+      where: { id: investment.id },
+      data: { currentAmount: newCurrentAmount, initialAmount: newInitialAmount },
+      include: { history: { orderBy: { date: 'asc' } } },
+    }),
+  ]);
+
+  return {
+    liquidBalance: updatedProfile.liquidBalance,
+    investment: updatedInvestment,
+  };
 }

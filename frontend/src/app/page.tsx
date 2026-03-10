@@ -9,7 +9,7 @@ import {
 } from "recharts";
 import {
   Activity, Wallet, TrendingUp, TrendingDown, Plus, Minus, Search, Trash2,
-  PieChart as PieChartIcon, MessageSquare, Zap, Send, ShieldAlert, CheckCircle2, LogOut, Loader2
+  PieChart as PieChartIcon, MessageSquare, Zap, Send, ShieldAlert, CheckCircle2, LogOut, Loader2, RotateCcw
 } from "lucide-react";
 import {
   getDashboardData,
@@ -19,6 +19,7 @@ import {
   updateInvestment,
   deleteInvestment,
   updateInvestmentColor,
+  deleteInvestmentHistory,
 } from "@/app/actions";
 
 // ==========================================
@@ -44,7 +45,7 @@ interface Investment {
   currentAmount: number;
   minBalance: number; // Ej: 200k para Dafuturo
   isLiquid: boolean; // Si se puede sacar plata facil (Verde/Rojo)
-  history: { date: string, value: number }[];
+  history: { id: string; date: string; value: number; type: string; delta: number; deltaInitial: number }[];
 }
 
 interface MarketAsset {
@@ -151,8 +152,12 @@ export default function ThomasCorpApp() {
             ...inv,
             category: inv.category as "PASIVA" | "ACTIVA",
             history: inv.history.map((h) => ({
+              id: h.id,
               date: h.date instanceof Date ? h.date.toISOString().split("T")[0] : String(h.date),
               value: h.value,
+              type: h.type,
+              delta: h.delta,
+              deltaInitial: h.deltaInitial,
             })),
           }))
         );
@@ -272,8 +277,12 @@ export default function ThomasCorpApp() {
           ...inv,
           category: inv.category as "PASIVA" | "ACTIVA",
           history: inv.history.map((h) => ({
+            id: h.id,
             date: h.date instanceof Date ? h.date.toISOString().split("T")[0] : String(h.date),
             value: h.value,
+            type: h.type,
+            delta: h.delta,
+            deltaInitial: h.deltaInitial,
           })),
         },
       ]);
@@ -297,8 +306,12 @@ export default function ThomasCorpApp() {
                 ...updated,
                 category: updated.category as "PASIVA" | "ACTIVA",
                 history: updated.history.map((h) => ({
+                  id: h.id,
                   date: h.date instanceof Date ? h.date.toISOString().split("T")[0] : String(h.date),
                   value: h.value,
+                  type: h.type,
+                  delta: h.delta,
+                  deltaInitial: h.deltaInitial,
                 })),
               }
             : inv
@@ -326,6 +339,35 @@ export default function ThomasCorpApp() {
       await updateInvestmentColor(invId, color);
     } catch (e: unknown) {
       alert(e instanceof Error ? e.message : "Error actualizando color");
+    }
+  };
+
+  const handleDeleteInvestmentHistory = async (historyId: string, invId: string) => {
+    if (!confirm('¿Deshacer este movimiento? El saldo de la inversión y tu billetera serán revertidos.')) return;
+    try {
+      const result = await deleteInvestmentHistory(historyId);
+      setLiquidWallet(result.liquidBalance);
+      const updated = result.investment;
+      setInvestments((prev) =>
+        prev.map((inv) =>
+          inv.id === invId
+            ? {
+                ...updated,
+                category: updated.category as "PASIVA" | "ACTIVA",
+                history: updated.history.map((h) => ({
+                  id: h.id,
+                  date: h.date instanceof Date ? h.date.toISOString().split("T")[0] : String(h.date),
+                  value: h.value,
+                  type: h.type,
+                  delta: h.delta,
+                  deltaInitial: h.deltaInitial,
+                })),
+              }
+            : inv
+        )
+      );
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : "Error deshaciendo movimiento");
     }
   };
 
@@ -366,7 +408,7 @@ export default function ThomasCorpApp() {
   const comparativeData = investments.map(inv => ({
     name: inv.name,
     rentabilidad: inv.currentAmount - inv.initialAmount,
-    fill: inv.category === 'ACTIVA' ? '#00f0ff' : '#ff0055',
+    fill: inv.color,
     category: inv.category,
   }));
 
@@ -474,8 +516,7 @@ export default function ThomasCorpApp() {
               <Pie
                 data={[
                   { name: "Liquidez", value: liquidWallet, fill: "#7000ff" },
-                  { name: "Inv. Pasivas", value: investments.filter(i => i.category === "PASIVA").reduce((s,i) => s + i.currentAmount, 0), fill: "#ff0055" },
-                  { name: "Inv. Activas", value: investments.filter(i => i.category === "ACTIVA").reduce((s,i) => s + i.currentAmount, 0), fill: "#00f0ff" },
+                  ...investments.map(inv => ({ name: inv.name, value: inv.currentAmount, fill: inv.color })),
                 ].filter(d => d.value > 0)}
                 cx="50%"
                 cy="50%"
@@ -663,13 +704,48 @@ export default function ThomasCorpApp() {
                     </div>
                     <div className="h-[120px] w-full">
                       <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={inv.history.length > 0 ? inv.history : [{ date: 'Inicio', value: inv.initialAmount }, { date: 'Hoy', value: inv.currentAmount }]}>
+                        <LineChart data={inv.history.length > 0 ? inv.history : [{ date: 'Inicio', value: inv.initialAmount, id: '', type: 'SNAPSHOT', delta: 0, deltaInitial: 0 }, { date: 'Hoy', value: inv.currentAmount, id: '', type: 'SNAPSHOT', delta: 0, deltaInitial: 0 }]}>
                           <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
                           <RechartsTooltip contentStyle={{ backgroundColor: '#05050A', borderColor: '#333', fontSize: '12px' }} formatter={(val) => `$${(val as number)?.toLocaleString() ?? String(val)}`} />
                           <Line type="monotone" dataKey="value" stroke={inv.color} strokeWidth={2} dot={{ r: 3, fill: inv.color }} />
                         </LineChart>
                       </ResponsiveContainer>
                     </div>
+
+                    {/* Historial de Movimientos con opción de Deshacer */}
+                    {inv.history.filter(h => h.type !== 'SNAPSHOT').length > 0 && (
+                      <div className="mt-3 pt-3 border-t border-white/5">
+                        <p className="text-[9px] text-gray-500 uppercase mb-2 flex items-center gap-1"><RotateCcw size={9} /> Historial (click para deshacer)</p>
+                        <div className="space-y-1.5 max-h-32 overflow-y-auto custom-scrollbar pr-1">
+                          {[...inv.history].reverse().filter(h => h.type !== 'SNAPSHOT').map((h) => (
+                            <div key={h.id} className="flex justify-between items-center">
+                              <div className="flex items-center gap-2">
+                                <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase ${
+                                  h.type === 'ADD' ? 'bg-[#00ffaa]/10 text-[#00ffaa]' :
+                                  h.type === 'WITHDRAW' ? 'bg-[#ff0055]/10 text-[#ff0055]' :
+                                  'bg-[#7000ff]/10 text-[#7000ff]'
+                                }`}>
+                                  {h.type === 'ADD' ? 'Depósito' : h.type === 'WITHDRAW' ? 'Retiro' : 'Rend.'}
+                                </span>
+                                <span className={`text-[9px] font-mono ${h.type === 'WITHDRAW' || h.delta < 0 ? 'text-[#ff0055]' : 'text-gray-300'}`}>
+                                  {h.type === 'WITHDRAW' ? '-' : h.delta >= 0 ? '+' : ''}${Math.abs(h.delta).toLocaleString()}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-[8px] text-gray-600">{new Date(h.date).toLocaleDateString()}</span>
+                                <button
+                                  onClick={() => handleDeleteInvestmentHistory(h.id, inv.id)}
+                                  className="text-gray-600 hover:text-[#ff0055] transition-colors"
+                                  title="Deshacer este movimiento"
+                                >
+                                  <RotateCcw size={10} />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     <div className="flex items-center justify-between mt-3 pt-3 border-t border-white/5">
                       <span className="text-[9px] text-gray-500 uppercase">Color del Fondo</span>
                       <input
@@ -695,9 +771,13 @@ export default function ThomasCorpApp() {
       {investments.length > 0 && (
         <div className="mt-10 bg-[#0A0A16]/80 p-6 rounded-2xl border border-white/10">
           <h3 className="text-xs text-gray-400 uppercase tracking-widest mb-2">Comparativa de Rentabilidad (Ganancia/Pérdida)</h3>
-          <div className="flex gap-4 mb-4">
-            <span className="flex items-center gap-1 text-[10px] text-gray-400"><span className="inline-block w-3 h-3 rounded-sm bg-[#ff0055]" /> Pasiva</span>
-            <span className="flex items-center gap-1 text-[10px] text-gray-400"><span className="inline-block w-3 h-3 rounded-sm bg-[#00f0ff]" /> Activa</span>
+          <div className="flex flex-wrap gap-4 mb-4">
+            {investments.map(inv => (
+              <span key={inv.id} className="flex items-center gap-1 text-[10px] text-gray-400">
+                <span className="inline-block w-3 h-3 rounded-sm" style={{ backgroundColor: inv.color }} />
+                {inv.name}
+              </span>
+            ))}
           </div>
           <div className="h-[250px] w-full">
             <ResponsiveContainer width="100%" height="100%">
