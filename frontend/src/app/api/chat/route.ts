@@ -65,7 +65,7 @@ ${investments.map((i) => `  * ${i.name} (${i.category}): Invertido $${i.initialA
     });
 
     const completion = await grokClient.chat.completions.create({
-      model: 'grok-2-latest',
+      model: 'grok-4-latest',
       messages: [
         {
           role: 'system',
