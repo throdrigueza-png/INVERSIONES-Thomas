@@ -25,7 +25,6 @@ jobs:
           cd frontend
           npm install
           npx prisma generate
-          npx prisma db push --accept-data-loss
           npm run build
           npm prune --production
 
@@ -52,7 +51,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: node-app
-      
+
       - name: Iniciar sesion en Azure
         uses: azure/login@v2
         with:
