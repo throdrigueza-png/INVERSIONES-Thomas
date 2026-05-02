@@ -474,7 +474,7 @@ export async function payCreditCard(data: {
   const newLiquidBalance = profile.liquidBalance - amountToPay;
   const newDebt = card.currentDebt - amountToPay;
 
-  await prisma.$transaction([
+  const [, , createdTx] = await prisma.$transaction([
     prisma.userProfile.update({
       where: { userId },
       data: { liquidBalance: newLiquidBalance },
@@ -497,6 +497,7 @@ export async function payCreditCard(data: {
   return {
     liquidBalance: newLiquidBalance,
     card: { ...card, currentDebt: newDebt },
+    transaction: createdTx,
   };
 }
 

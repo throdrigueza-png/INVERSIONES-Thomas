@@ -463,12 +463,13 @@ export default function ThomasCorpApp() {
       setCreditCards((prev) =>
         prev.map((c) => (c.id === cardId ? { ...c, currentDebt: result.card.currentDebt } : c))
       );
+      const tx = result.transaction;
       const payTx: WalletTransaction = {
-        id: Date.now().toString(),
-        amount: result.card.currentDebt !== undefined ? amount - (amount - result.card.currentDebt) : amount,
+        id: tx.id,
+        amount: tx.amount,
         type: "OUT",
-        description: `Pago tarjeta ${creditCards.find((c) => c.id === cardId)?.name ?? ""}`,
-        date: new Date().toISOString(),
+        description: tx.description,
+        date: tx.date instanceof Date ? tx.date.toISOString() : String(tx.date),
         source: "LIQUID",
         creditCardId: null,
       };
@@ -559,7 +560,7 @@ export default function ThomasCorpApp() {
           <h3 className="text-[10px] text-gray-400 uppercase tracking-widest text-center">Registrar Movimiento</h3>
           <div className="flex gap-2">
             <button onClick={() => { setTxType("IN"); setTxSource("LIQUID"); }} className={`flex-1 py-2 rounded-lg text-xs font-bold flex justify-center items-center gap-1 transition-all ${txType === "IN" ? "bg-[#00ffaa]/20 text-[#00ffaa] border border-[#00ffaa]/50" : "bg-[#0A0A16] text-gray-500"}`}><Plus size={14} /> Ingreso</button>
-            <button onClick={() => setTxType("OUT")} className={`flex-1 py-2 rounded-lg text-xs font-bold flex justify-center items-center gap-1 transition-all ${txType === "OUT" ? "bg-[#ff0055]/20 text-[#ff0055] border border-[#ff0055]/50" : "bg-[#0A0A16] text-gray-500"}`}><Minus size={14} /> Gasto</button>
+            <button onClick={() => { setTxType("OUT"); setTxSource("LIQUID"); }} className={`flex-1 py-2 rounded-lg text-xs font-bold flex justify-center items-center gap-1 transition-all ${txType === "OUT" ? "bg-[#ff0055]/20 text-[#ff0055] border border-[#ff0055]/50" : "bg-[#0A0A16] text-gray-500"}`}><Minus size={14} /> Gasto</button>
           </div>
           {/* Selector de fuente — solo para gastos y si hay tarjetas */}
           {txType === "OUT" && creditCards.length > 0 && (
@@ -1025,11 +1026,15 @@ export default function ThomasCorpApp() {
   // 💳 RENDER: MÓDULO "CRÉDITO"
   // ==========================================
   const renderCredito = () => {
-    const today = new Date().getDate();
-
     const getDaysUntil = (day: number) => {
-      const diff = day - today;
-      return diff >= 0 ? diff : diff + 31; // rough approximation
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = now.getMonth();
+      let target = new Date(year, month, day);
+      if (target.getTime() <= now.getTime()) {
+        target = new Date(year, month + 1, day);
+      }
+      return Math.ceil((target.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
     };
 
     return (
