@@ -20,6 +20,14 @@ jobs:
         with:
           node-version: '20.x'
 
+      - name: Crear archivo .env para producción
+        run: |
+          cd frontend
+          echo "GOOGLE_CLIENT_ID=181911766292-44ukekovbp51mgmqck12diups9mavunk.apps.googleusercontent.com" > .env
+          echo "GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }}" >> .env
+          echo "NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }}" >> .env
+          echo "NEXTAUTH_URL=https://portal-de-finanzas-thomas-d8frdfa8f7hvdhff.westus3-01.azurewebsites.net" >> .env
+
       - name: Instalar, Generar Prisma y Construir Next.js
         run: |
           cd frontend
