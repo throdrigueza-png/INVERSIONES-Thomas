@@ -40,10 +40,16 @@ export async function getDashboardData() {
     include: { history: { orderBy: { date: 'asc' } } },
   });
 
+  const creditCards = await prisma.creditCard.findMany({
+    where: { userId },
+    orderBy: { createdAt: 'asc' },
+  });
+
   return {
     liquidBalance: profile.liquidBalance,
     transactions,
     investments,
+    creditCards,
   };
 }
 
@@ -150,7 +156,19 @@ export async function deleteTransaction(id: string) {
   const profile = await prisma.userProfile.findUnique({ where: { userId } });
   if (!profile) throw new Error('Perfil no encontrado');
 
-  // Revertir el impacto en el saldo: si era ingreso, restar; si era gasto, sumar
+  // Transacción de tarjeta de crédito: revertir deuda de la tarjeta
+  if (tx.source === 'CREDIT_CARD' && tx.creditCardId) {
+    await prisma.$transaction([
+      prisma.creditCard.update({
+        where: { id: tx.creditCardId },
+        data: { currentDebt: { decrement: tx.amount } },
+      }),
+      prisma.walletTransaction.delete({ where: { id } }),
+    ]);
+    return { liquidBalance: profile.liquidBalance };
+  }
+
+  // Transacción líquida: revertir saldo de billetera
   const newBalance =
     tx.type === 'IN'
       ? profile.liquidBalance - tx.amount
@@ -360,4 +378,141 @@ export async function deleteInvestmentHistory(historyId: string) {
     liquidBalance: updatedProfile.liquidBalance,
     investment: updatedInvestment,
   };
+}
+
+// ==========================================
+// POST: Crear nueva tarjeta de crédito
+// ==========================================
+export async function createCreditCard(data: {
+  name: string;
+  creditLimit: number;
+  cutOffDate: number;
+  paymentDate: number;
+}) {
+  const userId = await getAuthUserId();
+
+  const card = await prisma.creditCard.create({
+    data: {
+      userId,
+      name: data.name,
+      creditLimit: data.creditLimit,
+      cutOffDate: data.cutOffDate,
+      paymentDate: data.paymentDate,
+      currentDebt: 0,
+    },
+  });
+
+  return { card };
+}
+
+// ==========================================
+// POST: Registrar gasto con tarjeta de crédito
+// ==========================================
+export async function registerCreditExpense(data: {
+  creditCardId: string;
+  amount: number;
+  description: string;
+}) {
+  const userId = await getAuthUserId();
+
+  const card = await prisma.creditCard.findFirst({
+    where: { id: data.creditCardId, userId },
+  });
+  if (!card) throw new Error('Tarjeta no encontrada');
+
+  const available = card.creditLimit - card.currentDebt;
+  if (data.amount > available) {
+    throw new Error(
+      `Cupo insuficiente. Disponible: $${available.toLocaleString()}`,
+    );
+  }
+
+  const [updatedCard, newTx] = await prisma.$transaction([
+    prisma.creditCard.update({
+      where: { id: data.creditCardId },
+      data: { currentDebt: card.currentDebt + data.amount },
+    }),
+    prisma.walletTransaction.create({
+      data: {
+        userId,
+        amount: data.amount,
+        type: 'OUT',
+        description: data.description,
+        source: 'CREDIT_CARD',
+        creditCardId: data.creditCardId,
+      },
+    }),
+  ]);
+
+  return { card: updatedCard, transaction: newTx };
+}
+
+// ==========================================
+// POST: Pagar tarjeta de crédito (resta de billetera líquida)
+// ==========================================
+export async function payCreditCard(data: {
+  creditCardId: string;
+  amount: number;
+}) {
+  const userId = await getAuthUserId();
+
+  const card = await prisma.creditCard.findFirst({
+    where: { id: data.creditCardId, userId },
+  });
+  if (!card) throw new Error('Tarjeta no encontrada');
+
+  const profile = await prisma.userProfile.findUnique({ where: { userId } });
+  if (!profile) throw new Error('Perfil no encontrado');
+
+  if (data.amount > profile.liquidBalance) {
+    throw new Error('Fondos líquidos insuficientes para realizar el pago');
+  }
+
+  const amountToPay = Math.min(data.amount, card.currentDebt);
+  if (amountToPay <= 0) throw new Error('La tarjeta no tiene deuda pendiente');
+
+  const newLiquidBalance = profile.liquidBalance - amountToPay;
+  const newDebt = card.currentDebt - amountToPay;
+
+  const [, , createdTx] = await prisma.$transaction([
+    prisma.userProfile.update({
+      where: { userId },
+      data: { liquidBalance: newLiquidBalance },
+    }),
+    prisma.creditCard.update({
+      where: { id: data.creditCardId },
+      data: { currentDebt: newDebt },
+    }),
+    prisma.walletTransaction.create({
+      data: {
+        userId,
+        amount: amountToPay,
+        type: 'OUT',
+        description: `Pago tarjeta ${card.name}`,
+        source: 'LIQUID',
+      },
+    }),
+  ]);
+
+  return {
+    liquidBalance: newLiquidBalance,
+    card: { ...card, currentDebt: newDebt },
+    transaction: createdTx,
+  };
+}
+
+// ==========================================
+// DELETE: Eliminar tarjeta de crédito
+// ==========================================
+export async function deleteCreditCard(cardId: string) {
+  const userId = await getAuthUserId();
+
+  const card = await prisma.creditCard.findFirst({
+    where: { id: cardId, userId },
+  });
+  if (!card) throw new Error('Tarjeta no encontrada');
+
+  await prisma.creditCard.delete({ where: { id: cardId } });
+
+  return { success: true };
 }

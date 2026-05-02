@@ -9,7 +9,8 @@ import {
 } from "recharts";
 import {
   Activity, Wallet, TrendingUp, TrendingDown, Plus, Minus, Search, Trash2,
-  PieChart as PieChartIcon, MessageSquare, Zap, Send, ShieldAlert, CheckCircle2, LogOut, Loader2, RotateCcw
+  PieChart as PieChartIcon, MessageSquare, Zap, Send, ShieldAlert, CheckCircle2, LogOut, Loader2, RotateCcw,
+  CreditCard as CreditCardIcon, AlertTriangle, Calendar
 } from "lucide-react";
 import {
   getDashboardData,
@@ -20,6 +21,10 @@ import {
   deleteInvestment,
   updateInvestmentColor,
   deleteInvestmentHistory,
+  createCreditCard,
+  registerCreditExpense,
+  payCreditCard,
+  deleteCreditCard,
 } from "@/app/actions";
 
 // ==========================================
@@ -33,6 +38,18 @@ interface WalletTransaction {
   type: "IN" | "OUT";
   description: string;
   date: string;
+  source?: "LIQUID" | "CREDIT_CARD";
+  creditCardId?: string | null;
+}
+
+// Tarjeta de Crédito
+interface CreditCard {
+  id: string;
+  name: string;
+  creditLimit: number;
+  cutOffDate: number;
+  paymentDate: number;
+  currentDebt: number;
 }
 
 // Inversiones (Pasivas, Activas, Dafuturo, ETFs)
@@ -105,11 +122,23 @@ export default function ThomasCorpApp() {
   const [txAmount, setTxAmount] = useState("");
   const [txDesc, setTxDesc] = useState("");
   const [txType, setTxType] = useState<"IN" | "OUT">("OUT");
+  const [txSource, setTxSource] = useState<"LIQUID" | string>("LIQUID"); // "LIQUID" o creditCardId
 
   // ==========================================
   // 📊 4. ESTADOS: "INVERSIONES"
   // ==========================================
   const [investments, setInvestments] = useState<Investment[]>([]);
+
+  // ==========================================
+  // 💳 ESTADOS: "CRÉDITO" (Tarjetas)
+  // ==========================================
+  const [creditCards, setCreditCards] = useState<CreditCard[]>([]);
+  const [isCCModalOpen, setIsCCModalOpen] = useState(false);
+  const [ccName, setCCName] = useState("");
+  const [ccLimit, setCCLimit] = useState("");
+  const [ccCutOff, setCCCutOff] = useState("15");
+  const [ccPayment, setCCPayment] = useState("25");
+  const [ccPayAmounts, setCCPayAmounts] = useState<Record<string, string>>({});
 
   // Controles del Módulo de Inversiones (FAB y Modal)
   const [isFabOpen, setIsFabOpen] = useState(false);
@@ -144,6 +173,8 @@ export default function ThomasCorpApp() {
           data.transactions.map((t) => ({
             ...t,
             type: t.type as "IN" | "OUT",
+            source: (t.source ?? "LIQUID") as "LIQUID" | "CREDIT_CARD",
+            creditCardId: t.creditCardId ?? null,
             date: t.date instanceof Date ? t.date.toISOString() : String(t.date),
           }))
         );
@@ -161,6 +192,7 @@ export default function ThomasCorpApp() {
             })),
           }))
         );
+        setCreditCards(data.creditCards);
       })
       .catch(console.error)
       .finally(() => setIsDataLoading(false));
@@ -212,6 +244,34 @@ export default function ThomasCorpApp() {
     const amount = parseSmartAmount(txAmount);
     if (!amount || amount <= 0) return;
 
+    // Gasto con tarjeta de crédito
+    if (txType === "OUT" && txSource !== "LIQUID") {
+      try {
+        const result = await registerCreditExpense({
+          creditCardId: txSource,
+          amount,
+          description: txDesc || "Gasto con tarjeta",
+        });
+        setCreditCards((prev) =>
+          prev.map((c) => (c.id === txSource ? { ...c, currentDebt: result.card.currentDebt } : c))
+        );
+        const newTx = {
+          ...result.transaction,
+          type: "OUT" as const,
+          source: "CREDIT_CARD" as const,
+          creditCardId: txSource,
+          date: result.transaction.date instanceof Date
+            ? result.transaction.date.toISOString()
+            : String(result.transaction.date),
+        };
+        setTransactions((prev) => [newTx, ...prev]);
+      } catch (e: unknown) {
+        alert(e instanceof Error ? e.message : "Error registrando gasto con tarjeta");
+      }
+      setTxAmount(""); setTxDesc("");
+      return;
+    }
+
     if (txType === "OUT" && amount > liquidWallet) {
       alert("¡Fondos líquidos insuficientes bro! Revisa tus inversiones.");
       return;
@@ -227,6 +287,8 @@ export default function ThomasCorpApp() {
       const newTx = {
         ...result.transaction,
         type: result.transaction.type as "IN" | "OUT",
+        source: "LIQUID" as const,
+        creditCardId: null,
         date: result.transaction.date instanceof Date
           ? result.transaction.date.toISOString()
           : String(result.transaction.date),
@@ -372,6 +434,63 @@ export default function ThomasCorpApp() {
   };
 
   // ==========================================
+  // 💳 LÓGICA DE TARJETAS DE CRÉDITO
+  // ==========================================
+  const handleCreateCreditCard = async () => {
+    const limit = parseSmartAmount(ccLimit);
+    if (!ccName || limit <= 0) return;
+    try {
+      const result = await createCreditCard({
+        name: ccName,
+        creditLimit: limit,
+        cutOffDate: Number(ccCutOff),
+        paymentDate: Number(ccPayment),
+      });
+      setCreditCards((prev) => [...prev, result.card]);
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : "Error creando tarjeta");
+    }
+    setIsCCModalOpen(false);
+    setCCName(""); setCCLimit(""); setCCCutOff("15"); setCCPayment("25");
+  };
+
+  const handlePayCreditCard = async (cardId: string) => {
+    const amount = parseSmartAmount(ccPayAmounts[cardId] ?? "");
+    if (!amount || amount <= 0) return;
+    try {
+      const result = await payCreditCard({ creditCardId: cardId, amount });
+      setLiquidWallet(result.liquidBalance);
+      setCreditCards((prev) =>
+        prev.map((c) => (c.id === cardId ? { ...c, currentDebt: result.card.currentDebt } : c))
+      );
+      const tx = result.transaction;
+      const payTx: WalletTransaction = {
+        id: tx.id,
+        amount: tx.amount,
+        type: "OUT",
+        description: tx.description,
+        date: tx.date instanceof Date ? tx.date.toISOString() : String(tx.date),
+        source: "LIQUID",
+        creditCardId: null,
+      };
+      setTransactions((prev) => [payTx, ...prev]);
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : "Error pagando tarjeta");
+    }
+    setCCPayAmounts((prev) => ({ ...prev, [cardId]: "" }));
+  };
+
+  const handleDeleteCreditCard = async (cardId: string, cardName: string) => {
+    if (!confirm(`¿Eliminar la tarjeta ${cardName}? Se perderá el historial de movimientos.`)) return;
+    try {
+      await deleteCreditCard(cardId);
+      setCreditCards((prev) => prev.filter((c) => c.id !== cardId));
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : "Error eliminando tarjeta");
+    }
+  };
+
+  // ==========================================
   // 🤖 LÓGICA DEL ASISTENTE IA
   // ==========================================
   const handleSendChatMessage = async () => {
@@ -438,11 +557,24 @@ export default function ThomasCorpApp() {
 
         {/* GASTOS HORMIGA / INGRESOS */}
         <div className="bg-[#05050A] border border-white/10 p-4 rounded-2xl flex flex-col gap-3">
-          <h3 className="text-[10px] text-gray-400 uppercase tracking-widest text-center">Registrar Movimiento Líquido</h3>
+          <h3 className="text-[10px] text-gray-400 uppercase tracking-widest text-center">Registrar Movimiento</h3>
           <div className="flex gap-2">
-            <button onClick={() => setTxType("IN")} className={`flex-1 py-2 rounded-lg text-xs font-bold flex justify-center items-center gap-1 transition-all ${txType === "IN" ? "bg-[#00ffaa]/20 text-[#00ffaa] border border-[#00ffaa]/50" : "bg-[#0A0A16] text-gray-500"}`}><Plus size={14} /> Ingreso</button>
-            <button onClick={() => setTxType("OUT")} className={`flex-1 py-2 rounded-lg text-xs font-bold flex justify-center items-center gap-1 transition-all ${txType === "OUT" ? "bg-[#ff0055]/20 text-[#ff0055] border border-[#ff0055]/50" : "bg-[#0A0A16] text-gray-500"}`}><Minus size={14} /> Gasto</button>
+            <button onClick={() => { setTxType("IN"); setTxSource("LIQUID"); }} className={`flex-1 py-2 rounded-lg text-xs font-bold flex justify-center items-center gap-1 transition-all ${txType === "IN" ? "bg-[#00ffaa]/20 text-[#00ffaa] border border-[#00ffaa]/50" : "bg-[#0A0A16] text-gray-500"}`}><Plus size={14} /> Ingreso</button>
+            <button onClick={() => { setTxType("OUT"); setTxSource("LIQUID"); }} className={`flex-1 py-2 rounded-lg text-xs font-bold flex justify-center items-center gap-1 transition-all ${txType === "OUT" ? "bg-[#ff0055]/20 text-[#ff0055] border border-[#ff0055]/50" : "bg-[#0A0A16] text-gray-500"}`}><Minus size={14} /> Gasto</button>
           </div>
+          {/* Selector de fuente — solo para gastos y si hay tarjetas */}
+          {txType === "OUT" && creditCards.length > 0 && (
+            <select
+              value={txSource}
+              onChange={(e) => setTxSource(e.target.value)}
+              className="w-full bg-[#0A0A16] border border-white/10 rounded-lg py-2 px-3 text-xs text-white outline-none focus:border-[#00f0ff]"
+            >
+              <option value="LIQUID">💵 Billetera Líquida</option>
+              {creditCards.map((c) => (
+                <option key={c.id} value={c.id}>💳 {c.name}</option>
+              ))}
+            </select>
+          )}
           <div className="flex gap-2">
             <div className="relative flex-1">
               <span className="absolute left-3 top-2.5 text-gray-500 text-xs">$</span>
@@ -453,7 +585,10 @@ export default function ThomasCorpApp() {
           {txAmount && parseSmartAmount(txAmount) > 0 && (
             <p className="text-[9px] text-[#00f0ff]/70 -mt-1 pl-1">= ${parseSmartAmount(txAmount).toLocaleString()}</p>
           )}
-          <button onClick={handleTransaction} className="w-full bg-[#00f0ff]/10 hover:bg-[#00f0ff]/20 text-[#00f0ff] border border-[#00f0ff]/30 py-2 rounded-lg text-xs font-bold transition-all uppercase tracking-widest">Registrar a Billetera</button>
+          {txType === "OUT" && txSource !== "LIQUID" && (
+            <p className="text-[9px] text-yellow-400/70 -mt-1 pl-1">⚡ Este gasto se cargará a tu tarjeta, no a tu billetera.</p>
+          )}
+          <button onClick={handleTransaction} className="w-full bg-[#00f0ff]/10 hover:bg-[#00f0ff]/20 text-[#00f0ff] border border-[#00f0ff]/30 py-2 rounded-lg text-xs font-bold transition-all uppercase tracking-widest">Registrar Movimiento</button>
         </div>
       </div>
 
@@ -485,11 +620,14 @@ export default function ThomasCorpApp() {
               transactions.map(tx => (
                 <div key={tx.id} className="flex justify-between items-center border-b border-white/5 pb-2">
                   <div>
-                    <p className="text-xs text-white">{tx.description}</p>
+                    <p className="text-xs text-white flex items-center gap-1">
+                      {tx.source === "CREDIT_CARD" && <CreditCardIcon size={10} className="text-yellow-400" />}
+                      {tx.description}
+                    </p>
                     <p className="text-[9px] text-gray-500">{new Date(tx.date).toLocaleDateString()}</p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className={`text-xs font-bold ${tx.type === 'IN' ? 'text-[#00ffaa]' : 'text-[#ff0055]'}`}>
+                    <span className={`text-xs font-bold ${tx.type === 'IN' ? 'text-[#00ffaa]' : tx.source === 'CREDIT_CARD' ? 'text-yellow-400' : 'text-[#ff0055]'}`}>
                       {tx.type === 'IN' ? '+' : '-'}${tx.amount.toLocaleString()}
                     </span>
                     <button
@@ -885,6 +1023,257 @@ export default function ThomasCorpApp() {
   );
 
   // ==========================================
+  // 💳 RENDER: MÓDULO "CRÉDITO"
+  // ==========================================
+  const renderCredito = () => {
+    const getDaysUntil = (day: number) => {
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = now.getMonth();
+      let target = new Date(year, month, day);
+      if (target.getTime() <= now.getTime()) {
+        target = new Date(year, month + 1, day);
+      }
+      return Math.ceil((target.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+    };
+
+    return (
+      <div className="space-y-6 animate-in fade-in duration-500 pb-24">
+        {/* HEADER */}
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-white/5 pb-4">
+          <div>
+            <h2 className="text-xl font-bold text-white tracking-widest uppercase flex items-center gap-2">
+              <CreditCardIcon size={20} className="text-yellow-400" /> Control de Crédito
+            </h2>
+            <p className="text-xs text-gray-500">Dinero prestado vs. dinero tuyo</p>
+          </div>
+          <button
+            onClick={() => setIsCCModalOpen(true)}
+            className="flex items-center gap-2 bg-yellow-400/10 hover:bg-yellow-400/20 border border-yellow-400/30 text-yellow-400 px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-widest transition-all"
+          >
+            <Plus size={14} /> Agregar Tarjeta
+          </button>
+        </div>
+
+        {/* RESUMEN GLOBAL */}
+        {creditCards.length > 0 && (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="bg-[#0A0A16]/80 border border-yellow-400/20 p-4 rounded-2xl">
+              <p className="text-[10px] text-gray-400 uppercase tracking-widest">Deuda Total</p>
+              <p className="text-2xl font-bold text-yellow-400 mt-2">
+                ${creditCards.reduce((s, c) => s + c.currentDebt, 0).toLocaleString()}
+              </p>
+            </div>
+            <div className="bg-[#0A0A16]/80 border border-white/10 p-4 rounded-2xl">
+              <p className="text-[10px] text-gray-400 uppercase tracking-widest">Cupo Total</p>
+              <p className="text-2xl font-bold text-white mt-2">
+                ${creditCards.reduce((s, c) => s + c.creditLimit, 0).toLocaleString()}
+              </p>
+            </div>
+            <div className="bg-[#0A0A16]/80 border border-[#00ffaa]/20 p-4 rounded-2xl">
+              <p className="text-[10px] text-gray-400 uppercase tracking-widest">Cupo Disponible</p>
+              <p className="text-2xl font-bold text-[#00ffaa] mt-2">
+                ${creditCards.reduce((s, c) => s + (c.creditLimit - c.currentDebt), 0).toLocaleString()}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* TARJETAS */}
+        {creditCards.length === 0 ? (
+          <div className="py-20 text-center border border-dashed border-white/10 rounded-2xl">
+            <CreditCardIcon size={40} className="mx-auto mb-3 text-gray-600" />
+            <p className="text-gray-500 text-sm">No tienes tarjetas registradas.</p>
+            <p className="text-gray-600 text-xs mt-1">Agrega tu tarjeta para separar el dinero prestado del tuyo.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+            {creditCards.map((card) => {
+              const available = card.creditLimit - card.currentDebt;
+              const usagePercent = card.creditLimit > 0 ? (card.currentDebt / card.creditLimit) * 100 : 0;
+              const daysUntilCutOff = getDaysUntil(card.cutOffDate);
+              const daysUntilPayment = getDaysUntil(card.paymentDate);
+              const isUrgentCutOff = daysUntilCutOff <= 5;
+              const isUrgentPayment = daysUntilPayment <= 7;
+
+              return (
+                <div key={card.id} className="relative bg-gradient-to-br from-[#1a0a2e] to-[#0A0A16] border border-yellow-400/20 rounded-2xl p-5 flex flex-col gap-4 shadow-lg overflow-hidden">
+                  {/* Chip decorativo */}
+                  <div className="absolute top-4 right-4 w-8 h-6 rounded bg-yellow-400/20 border border-yellow-400/30 flex items-center justify-center">
+                    <div className="w-5 h-4 rounded-sm bg-yellow-400/40 border border-yellow-400/20" />
+                  </div>
+
+                  {/* Nombre y header */}
+                  <div>
+                    <p className="text-[9px] text-yellow-400/60 uppercase tracking-widest">Tarjeta de Crédito</p>
+                    <h3 className="text-xl font-black text-white tracking-widest mt-1">{card.name}</h3>
+                  </div>
+
+                  {/* Saldos */}
+                  <div className="grid grid-cols-3 gap-2 bg-black/30 p-3 rounded-xl border border-white/5">
+                    <div>
+                      <p className="text-[8px] text-gray-500 uppercase">Cupo Total</p>
+                      <p className="text-xs font-mono text-gray-300 mt-0.5">${card.creditLimit.toLocaleString()}</p>
+                    </div>
+                    <div>
+                      <p className="text-[8px] text-gray-500 uppercase">Deuda</p>
+                      <p className="text-xs font-mono font-bold text-yellow-400 mt-0.5">${card.currentDebt.toLocaleString()}</p>
+                    </div>
+                    <div>
+                      <p className="text-[8px] text-gray-500 uppercase">Disponible</p>
+                      <p className="text-xs font-mono font-bold text-[#00ffaa] mt-0.5">${available.toLocaleString()}</p>
+                    </div>
+                  </div>
+
+                  {/* Barra de uso del cupo */}
+                  <div>
+                    <div className="flex justify-between text-[8px] text-gray-500 mb-1">
+                      <span>Uso del cupo</span>
+                      <span>{usagePercent.toFixed(0)}%</span>
+                    </div>
+                    <div className="h-2 bg-white/10 rounded-full overflow-hidden">
+                      <div
+                        className="h-full rounded-full transition-all"
+                        style={{
+                          width: `${Math.min(usagePercent, 100)}%`,
+                          backgroundColor: usagePercent > 80 ? '#ff0055' : usagePercent > 50 ? '#ffd700' : '#00ffaa',
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Fechas clave */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className={`flex items-center gap-2 p-2 rounded-xl border ${isUrgentCutOff ? 'bg-red-900/20 border-red-500/50' : 'bg-white/5 border-white/10'}`}>
+                      <Calendar size={12} className={isUrgentCutOff ? 'text-red-400' : 'text-gray-500'} />
+                      <div>
+                        <p className="text-[8px] text-gray-500 uppercase">Corte</p>
+                        <p className={`text-xs font-bold ${isUrgentCutOff ? 'text-red-400' : 'text-white'}`}>
+                          Día {card.cutOffDate}
+                          {isUrgentCutOff && <span className="ml-1 text-[8px]">({daysUntilCutOff}d)</span>}
+                        </p>
+                      </div>
+                      {isUrgentCutOff && <AlertTriangle size={10} className="text-red-400 ml-auto" />}
+                    </div>
+                    <div className={`flex items-center gap-2 p-2 rounded-xl border ${isUrgentPayment ? 'bg-orange-900/20 border-orange-500/50' : 'bg-white/5 border-white/10'}`}>
+                      <Calendar size={12} className={isUrgentPayment ? 'text-orange-400' : 'text-gray-500'} />
+                      <div>
+                        <p className="text-[8px] text-gray-500 uppercase">Pago</p>
+                        <p className={`text-xs font-bold ${isUrgentPayment ? 'text-orange-400' : 'text-white'}`}>
+                          Día {card.paymentDate}
+                          {isUrgentPayment && <span className="ml-1 text-[8px]">({daysUntilPayment}d)</span>}
+                        </p>
+                      </div>
+                      {isUrgentPayment && <AlertTriangle size={10} className="text-orange-400 ml-auto" />}
+                    </div>
+                  </div>
+
+                  {/* Pagar tarjeta */}
+                  {card.currentDebt > 0 && (
+                    <div className="flex gap-2 items-center pt-2 border-t border-white/5">
+                      <div className="relative flex-1">
+                        <span className="absolute left-2 top-2 text-gray-500 text-[10px]">$</span>
+                        <input
+                          type="text"
+                          value={ccPayAmounts[card.id] ?? ""}
+                          onChange={(e) => setCCPayAmounts((prev) => ({ ...prev, [card.id]: e.target.value }))}
+                          placeholder={`Pagar (máx $${card.currentDebt.toLocaleString()})`}
+                          className="w-full bg-[#05050A] border border-white/10 rounded-lg py-2 pl-5 pr-2 text-[10px] text-white outline-none focus:border-yellow-400/50"
+                        />
+                      </div>
+                      <button
+                        disabled={!ccPayAmounts[card.id] || parseSmartAmount(ccPayAmounts[card.id]) <= 0}
+                        onClick={() => handlePayCreditCard(card.id)}
+                        className="bg-yellow-400/10 hover:bg-yellow-400/20 border border-yellow-400/30 text-yellow-400 px-3 py-2 rounded-lg text-[10px] font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 whitespace-nowrap"
+                      >
+                        Pagar 💳
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Eliminar tarjeta */}
+                  <button
+                    onClick={() => handleDeleteCreditCard(card.id, card.name)}
+                    className="text-gray-600 hover:text-[#ff0055] transition-colors text-[10px] flex items-center gap-1 self-start"
+                  >
+                    <Trash2 size={10} /> Eliminar tarjeta
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* MODAL: Agregar tarjeta */}
+        <AnimatePresence>
+          {isCCModalOpen && (
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center">
+              <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-[#0A0A16] border border-yellow-400/20 p-6 rounded-2xl w-full max-w-md shadow-2xl">
+                <h3 className="text-lg font-bold text-white mb-5 uppercase tracking-widest flex items-center gap-2">
+                  <CreditCardIcon size={18} className="text-yellow-400" /> Nueva Tarjeta de Crédito
+                </h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-[10px] text-gray-500 uppercase">Nombre del banco / tarjeta</label>
+                    <input
+                      type="text"
+                      value={ccName}
+                      onChange={(e) => setCCName(e.target.value)}
+                      placeholder="Ej: Nu, Bancolombia, Falabella"
+                      className="w-full bg-[#05050A] border border-white/10 rounded-lg p-3 text-sm text-white focus:border-yellow-400/50 outline-none mt-1"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500 uppercase">Cupo total (Límite)</label>
+                    <input
+                      type="text"
+                      value={ccLimit}
+                      onChange={(e) => setCCLimit(e.target.value)}
+                      placeholder="Ej: 3000 = $3.000.000"
+                      className="w-full bg-[#05050A] border border-white/10 rounded-lg p-3 text-sm text-white focus:border-yellow-400/50 outline-none mt-1"
+                    />
+                    {ccLimit && parseSmartAmount(ccLimit) > 0 && (
+                      <p className="text-[9px] text-yellow-400/70 mt-1">= ${parseSmartAmount(ccLimit).toLocaleString()}</p>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[10px] text-gray-500 uppercase">Día de corte</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={31}
+                        value={ccCutOff}
+                        onChange={(e) => setCCCutOff(e.target.value)}
+                        className="w-full bg-[#05050A] border border-white/10 rounded-lg p-3 text-sm text-white focus:border-yellow-400/50 outline-none mt-1"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-500 uppercase">Día de pago</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={31}
+                        value={ccPayment}
+                        onChange={(e) => setCCPayment(e.target.value)}
+                        className="w-full bg-[#05050A] border border-white/10 rounded-lg p-3 text-sm text-white focus:border-yellow-400/50 outline-none mt-1"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex gap-3 mt-6">
+                    <button onClick={() => setIsCCModalOpen(false)} className="flex-1 bg-transparent border border-white/20 text-white p-3 rounded-lg text-xs tracking-widest uppercase hover:bg-white/5 transition-all">Cancelar</button>
+                    <button onClick={handleCreateCreditCard} className="flex-1 bg-yellow-400/10 border border-yellow-400/30 text-yellow-400 p-3 rounded-lg text-xs font-bold tracking-widest uppercase hover:bg-yellow-400/20 transition-all">Agregar Tarjeta</button>
+                  </div>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+      </div>
+    );
+  };
+
+  // ==========================================
   // 🖥️ 9. RENDER: MÓDULO "SEARCH" (Placeholder Parte 3)
   // ==========================================
   const renderSearch = () => {
@@ -1095,6 +1484,11 @@ export default function ThomasCorpApp() {
             <span className="text-xs font-bold uppercase tracking-widest">Search ETF</span>
           </button>
 
+          <button onClick={() => setActiveTab("credito")} className={`flex items-center gap-3 p-3 rounded-xl transition-all ${activeTab === "credito" ? "bg-yellow-400/10 text-yellow-400 border border-yellow-400/30" : "text-gray-500 hover:bg-white/5 hover:text-white"}`}>
+            <CreditCardIcon size={18} />
+            <span className="text-xs font-bold uppercase tracking-widest">Crédito</span>
+          </button>
+
           {/* Asistente IA */}
           <button onClick={() => setIsChatOpen(true)} className={`flex items-center gap-3 p-3 rounded-xl transition-all text-gray-500 hover:bg-white/5 hover:text-white`}>
             <MessageSquare size={18} />
@@ -1152,6 +1546,7 @@ export default function ThomasCorpApp() {
           {activeTab === "mi_estado" && renderMiEstado()}
           {activeTab === "inversiones" && renderInversiones()}
           {activeTab === "search" && renderSearch()}
+          {activeTab === "credito" && renderCredito()}
         </div>
       </main>
 
@@ -1257,14 +1652,21 @@ export default function ThomasCorpApp() {
         </button>
         <button
           onClick={() => setActiveTab("search")}
-          className={`flex flex-col items-center gap-1 px-4 py-1 rounded-xl transition-all ${activeTab === "search" ? "text-[#7000ff]" : "text-gray-500"}`}
+          className={`flex flex-col items-center gap-1 px-3 py-1 rounded-xl transition-all ${activeTab === "search" ? "text-[#7000ff]" : "text-gray-500"}`}
         >
           <Search size={20} />
           <span className="text-[9px] uppercase tracking-widest">ETF</span>
         </button>
         <button
+          onClick={() => setActiveTab("credito")}
+          className={`flex flex-col items-center gap-1 px-3 py-1 rounded-xl transition-all ${activeTab === "credito" ? "text-yellow-400" : "text-gray-500"}`}
+        >
+          <CreditCardIcon size={20} />
+          <span className="text-[9px] uppercase tracking-widest">Crédito</span>
+        </button>
+        <button
           onClick={() => setIsChatOpen(true)}
-          className="flex flex-col items-center gap-1 px-4 py-1 rounded-xl transition-all text-gray-500"
+          className="flex flex-col items-center gap-1 px-3 py-1 rounded-xl transition-all text-gray-500"
         >
           <MessageSquare size={20} />
           <span className="text-[9px] uppercase tracking-widest">IA</span>
