@@ -9,6 +9,14 @@ datasource db {
 }
 
 // ==========================================
+// ENUMS
+// ==========================================
+enum TransactionSource {
+  LIQUID
+  CREDIT_CARD
+}
+
+// ==========================================
 // NEXTAUTH: Modelos de Autenticación
 // ==========================================
 model User {
@@ -24,6 +32,7 @@ model User {
   profile      UserProfile?
   transactions WalletTransaction[]
   investments  Investment[]
+  creditCards  CreditCard[]
 }
 
 model Account {
@@ -76,13 +85,16 @@ model UserProfile {
 // 2. HISTORIAL DE GASTOS HORMIGA / INGRESOS (por usuario)
 // ==========================================
 model WalletTransaction {
-  id          String   @id @default(uuid())
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  amount      Float
-  type        String   // "IN" o "OUT"
-  description String
-  date        DateTime @default(now())
+  id           String            @id @default(uuid())
+  userId       String
+  user         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amount       Float
+  type         String            // "IN" o "OUT"
+  description  String
+  date         DateTime          @default(now())
+  source       TransactionSource @default(LIQUID)
+  creditCardId String?
+  creditCard   CreditCard?       @relation(fields: [creditCardId], references: [id], onDelete: SetNull)
 }
 
 // ==========================================
@@ -117,4 +129,20 @@ model InvestmentHistory {
   delta        Float      @default(0)          // Cambio en currentAmount (negativo si fue pérdida en RETURN)
   deltaInitial Float      @default(0)          // Cambio real en initialAmount (puede ser menor que delta en WITHDRAW)
   date         DateTime   @default(now())
+}
+
+// ==========================================
+// 5. TARJETAS DE CRÉDITO (por usuario)
+// ==========================================
+model CreditCard {
+  id           String             @id @default(uuid())
+  userId       String
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name         String             // Ej: Nu, Bancolombia
+  creditLimit  Float              // Cupo total
+  cutOffDate   Int                // Día de corte (1-31)
+  paymentDate  Int                // Día de pago (1-31)
+  currentDebt  Float              @default(0) // Deuda actual
+  createdAt    DateTime           @default(now())
+  transactions WalletTransaction[]
 }
