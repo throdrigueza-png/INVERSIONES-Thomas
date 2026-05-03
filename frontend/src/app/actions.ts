@@ -520,6 +520,8 @@ export async function createCreditCard(data: {
   creditLimit: number;
   cutOffDate: number;
   paymentDate: number;
+  color?: string;
+  cuotaManejo?: number;
 }) {
   const userId = await getAuthUserId();
 
@@ -531,10 +533,27 @@ export async function createCreditCard(data: {
       cutOffDate: data.cutOffDate,
       paymentDate: data.paymentDate,
       currentDebt: 0,
+      color: data.color ?? '#ffd700',
+      cuotaManejo: data.cuotaManejo ?? 0,
     },
   });
 
-  return { card };
+  // Agendar eventos en Google Calendar (no bloquea la creación)
+  const calendarEventIds = await createCalendarEvents(userId, {
+    name: card.name,
+    cutOffDate: card.cutOffDate,
+    paymentDate: card.paymentDate,
+  });
+
+  let finalCard = card;
+  if (calendarEventIds.cutoffEventId || calendarEventIds.paymentEventId) {
+    finalCard = await prisma.creditCard.update({
+      where: { id: card.id },
+      data: { googleCalendarEventId: JSON.stringify(calendarEventIds) },
+    });
+  }
+
+  return { card: finalCard };
 }
 
 // ==========================================
@@ -644,7 +663,60 @@ export async function deleteCreditCard(cardId: string) {
   });
   if (!card) throw new Error('Tarjeta no encontrada');
 
+  // Limpiar eventos de Google Calendar (silencioso si falla)
+  await deleteCalendarEvents(userId, card.googleCalendarEventId ?? null);
+
   await prisma.creditCard.delete({ where: { id: cardId } });
 
   return { success: true };
+}
+
+// ==========================================
+// POST: Avance de tarjeta de crédito → Liquidez
+// ==========================================
+export async function transferCreditToLiquid(data: {
+  creditCardId: string;
+  amount: number;
+}) {
+  const userId = await getAuthUserId();
+
+  const card = await prisma.creditCard.findFirst({
+    where: { id: data.creditCardId, userId },
+  });
+  if (!card) throw new Error('Tarjeta no encontrada');
+
+  const available = card.creditLimit - card.currentDebt;
+  if (data.amount > available) {
+    throw new Error(`Cupo insuficiente. Disponible: $${available.toLocaleString()}`);
+  }
+
+  const profile = await prisma.userProfile.findUnique({ where: { userId } });
+  if (!profile) throw new Error('Perfil no encontrado');
+
+  const [updatedCard, updatedProfile, avanceTx] = await prisma.$transaction([
+    prisma.creditCard.update({
+      where: { id: data.creditCardId },
+      data: { currentDebt: card.currentDebt + data.amount },
+    }),
+    prisma.userProfile.update({
+      where: { userId },
+      data: { liquidBalance: profile.liquidBalance + data.amount },
+    }),
+    prisma.walletTransaction.create({
+      data: {
+        userId,
+        amount: data.amount,
+        type: 'IN',
+        description: `Avance tarjeta ${card.name}`,
+        source: 'CREDIT_CARD',
+        creditCardId: data.creditCardId,
+      },
+    }),
+  ]);
+
+  return {
+    card: updatedCard,
+    liquidBalance: updatedProfile.liquidBalance,
+    transaction: avanceTx,
+  };
 }
