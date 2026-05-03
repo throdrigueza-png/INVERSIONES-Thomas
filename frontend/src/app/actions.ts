@@ -73,8 +73,9 @@ async function createCalendarEvents(
   const month = now.getMonth() + 1; // 1-indexed
 
   const toDateStr = (day: number) => {
-    // Ensure day is valid for the month
-    const d = Math.min(day, 28);
+    // Clamp to the last valid day of the current month
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const d = Math.min(day, daysInMonth);
     return `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
   };
 

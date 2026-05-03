@@ -226,7 +226,7 @@ export default function ThomasCorpApp() {
   }, [creditCards]);
 
   // PODER DE GASTO TOTAL: Liquidez + Inversiones + Cupo disponible
-  const NET_CAPITAL = liquidWallet + totalInvestedValue + totalCreditAvailable;
+  const TOTAL_SPENDING_POWER = liquidWallet + totalInvestedValue + totalCreditAvailable;
 
   // ==========================================
   // ⚙️ 6. LÓGICA DE NEGOCIO (BILLETERA E INVERSIONES)
@@ -572,7 +572,7 @@ export default function ThomasCorpApp() {
     { name: 'Ene', neto: 900000, gastos: 150000 },
     { name: 'Feb', neto: 1050000, gastos: 120000 },
     { name: 'Mar', neto: 1120000, gastos: 200000 },
-    { name: 'Abr', neto: NET_CAPITAL, gastos: transactions.filter(t => t.type === 'OUT').reduce((s, t) => s + t.amount, 0) },
+    { name: 'Abr', neto: TOTAL_SPENDING_POWER, gastos: transactions.filter(t => t.type === 'OUT').reduce((s, t) => s + t.amount, 0) },
   ];
 
   const comparativeData = investments.map(inv => ({
@@ -1672,7 +1672,7 @@ export default function ThomasCorpApp() {
               <Loader2 size={28} className="text-[#00f0ff] animate-spin ml-auto mt-1" />
             ) : (
               <p className="text-2xl sm:text-3xl md:text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-[#00f0ff] to-[#7000ff]">
-                ${NET_CAPITAL.toLocaleString()}
+                ${TOTAL_SPENDING_POWER.toLocaleString()}
               </p>
             )}
           </div>
