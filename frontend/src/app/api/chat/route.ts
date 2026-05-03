@@ -20,7 +20,7 @@ export async function POST(req: Request) {
     }
 
     // 2. Obtener contexto financiero real del usuario desde la BD
-    const [profile, transactions, investments] = await Promise.all([
+    const [profile, transactions, investments, creditCards] = await Promise.all([
       prisma.userProfile.findUnique({ where: { userId } }),
       prisma.walletTransaction.findMany({
         where: { userId },
@@ -28,6 +28,7 @@ export async function POST(req: Request) {
         take: 10,
       }),
       prisma.investment.findMany({ where: { userId } }),
+      prisma.creditCard.findMany({ where: { userId } }),
     ]);
 
     const totalInvested = investments.reduce((s, i) => s + i.currentAmount, 0);
@@ -37,6 +38,8 @@ export async function POST(req: Request) {
     const totalIngresos = transactions
       .filter((t) => t.type === 'IN')
       .reduce((s, t) => s + t.amount, 0);
+    const totalDeuda = creditCards.reduce((s, c) => s + c.currentDebt, 0);
+    const totalCupoDisponible = creditCards.reduce((s, c) => s + (c.creditLimit - c.currentDebt), 0);
 
     const financialContext = `
 Estado financiero actual del usuario (${session.user.name ?? 'Usuario'}):
@@ -48,6 +51,10 @@ Estado financiero actual del usuario (${session.user.name ?? 'Usuario'}):
 - Número de inversiones activas: ${investments.length}
 - Inversiones:
 ${investments.map((i) => `  * ${i.name} (${i.category}): Invertido $${i.initialAmount.toLocaleString()}, Actual $${i.currentAmount.toLocaleString()}, Ganancia: $${(i.currentAmount - i.initialAmount).toLocaleString()}`).join('\n')}
+- Tarjetas de crédito: ${creditCards.length}
+- Deuda total en crédito: $${totalDeuda.toLocaleString()}
+- Cupo disponible total en crédito: $${totalCupoDisponible.toLocaleString()}
+${creditCards.map((c) => `  * ${c.name}: Cupo $${c.creditLimit.toLocaleString()}, Deuda $${c.currentDebt.toLocaleString()}, Día pago: ${c.paymentDate}`).join('\n')}
 `;
 
     // 3. Llamar al proveedor de IA con el contexto financiero
@@ -60,10 +67,13 @@ ${investments.map((i) => `  * ${i.name} (${i.category}): Invertido $${i.initialA
     }
 
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({
-      model: 'gemini-1.5-flash',
-      systemInstruction: `Eres un asesor financiero personal experto en inversiones, ahorro y optimización de gastos para el mercado latinoamericano (especialmente Colombia). Responde siempre en español, de forma concisa y con emojis financieros. Usa el contexto financiero real del usuario para dar consejos personalizados.\n\n${financialContext}`,
-    });
+    const model = genAI.getGenerativeModel(
+      {
+        model: 'gemini-1.5-flash',
+        systemInstruction: `Eres un asesor financiero personal experto en inversiones, ahorro y optimización de gastos para el mercado latinoamericano (especialmente Colombia). Responde siempre en español, de forma concisa y con emojis financieros. Usa el contexto financiero real del usuario para dar consejos personalizados.\n\n${financialContext}`,
+      },
+      { apiVersion: 'v1' },
+    );
 
     const result = await model.generateContent({
       contents: [{ role: 'user', parts: [{ text: message }] }],

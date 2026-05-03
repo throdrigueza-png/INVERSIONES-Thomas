@@ -135,14 +135,17 @@ model InvestmentHistory {
 // 5. TARJETAS DE CRÉDITO (por usuario)
 // ==========================================
 model CreditCard {
-  id           String             @id @default(uuid())
-  userId       String
-  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name         String             // Ej: Nu, Bancolombia
-  creditLimit  Float              // Cupo total
-  cutOffDate   Int                // Día de corte (1-31)
-  paymentDate  Int                // Día de pago (1-31)
-  currentDebt  Float              @default(0) // Deuda actual
-  createdAt    DateTime           @default(now())
-  transactions WalletTransaction[]
+  id                   String             @id @default(uuid())
+  userId               String
+  user                 User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name                 String             // Ej: Nu, Bancolombia
+  creditLimit          Float              // Cupo total
+  cutOffDate           Int                // Día de corte (1-31)
+  paymentDate          Int                // Día de pago (1-31)
+  currentDebt          Float              @default(0) // Deuda actual
+  color                String             @default("#ffd700") // Color hex para personalización
+  cuotaManejo          Float              @default(0) // Cobro mensual del banco (0 si no aplica)
+  googleCalendarEventId String?           // JSON con IDs de eventos de Google Calendar
+  createdAt            DateTime           @default(now())
+  transactions         WalletTransaction[]
 }
