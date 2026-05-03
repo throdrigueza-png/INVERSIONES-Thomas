@@ -3,6 +3,7 @@
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import { google } from 'googleapis';
 
 // ==========================================
 // HELPER: Obtener userId verificado
@@ -13,6 +14,138 @@ async function getAuthUserId(): Promise<string> {
     throw new Error('No autenticado');
   }
   return session.user.id;
+}
+
+// ==========================================
+// HELPER: Crear cliente OAuth2 con tokens del usuario
+// ==========================================
+async function getGoogleCalendarClient(userId: string) {
+  const account = await prisma.account.findFirst({
+    where: { userId, provider: 'google' },
+  });
+  if (!account?.access_token) return null;
+
+  const oauth2Client = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET,
+  );
+
+  oauth2Client.setCredentials({
+    access_token: account.access_token,
+    refresh_token: account.refresh_token ?? undefined,
+    expiry_date: account.expires_at ? account.expires_at * 1000 : undefined,
+  });
+
+  // Refresh token si expiró
+  if (account.expires_at && Date.now() > account.expires_at * 1000) {
+    try {
+      const { credentials } = await oauth2Client.refreshAccessToken();
+      await prisma.account.update({
+        where: { id: account.id },
+        data: {
+          access_token: credentials.access_token ?? account.access_token,
+          expires_at: credentials.expiry_date
+            ? Math.floor(credentials.expiry_date / 1000)
+            : account.expires_at,
+        },
+      });
+      oauth2Client.setCredentials(credentials);
+    } catch {
+      return null;
+    }
+  }
+
+  return google.calendar({ version: 'v3', auth: oauth2Client });
+}
+
+// ==========================================
+// HELPER: Crear eventos de calendario para una tarjeta
+// ==========================================
+async function createCalendarEvents(
+  userId: string,
+  card: { name: string; cutOffDate: number; paymentDate: number },
+): Promise<{ cutoffEventId?: string; paymentEventId?: string }> {
+  const calendar = await getGoogleCalendarClient(userId);
+  if (!calendar) return {};
+
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth() + 1; // 1-indexed
+
+  const toDateStr = (day: number) => {
+    // Clamp to the last valid day of the current month
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const d = Math.min(day, daysInMonth);
+    return `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  };
+
+  try {
+    const [cutoffEvent, paymentEvent] = await Promise.all([
+      calendar.events.insert({
+        calendarId: 'primary',
+        requestBody: {
+          summary: `📅 Corte tarjeta ${card.name}`,
+          description: `Día de corte de tu tarjeta ${card.name}. Revisa tus gastos y administra tu presupuesto para el siguiente ciclo.`,
+          start: { date: toDateStr(card.cutOffDate) },
+          end: { date: toDateStr(card.cutOffDate) },
+          recurrence: ['RRULE:FREQ=MONTHLY'],
+          reminders: {
+            useDefault: false,
+            overrides: [{ method: 'popup', minutes: 60 * 24 }],
+          },
+        },
+      }),
+      calendar.events.insert({
+        calendarId: 'primary',
+        requestBody: {
+          summary: `💳 ¡PAGA TU TARJETA HOY! - ${card.name}`,
+          description: `Recuerda realizar tu pago de la tarjeta ${card.name} hoy para evitar intereses y moras.`,
+          start: { date: toDateStr(card.paymentDate) },
+          end: { date: toDateStr(card.paymentDate) },
+          recurrence: ['RRULE:FREQ=MONTHLY'],
+          reminders: {
+            useDefault: false,
+            overrides: [
+              { method: 'popup', minutes: 60 * 24 },
+              { method: 'popup', minutes: 60 * 9 },
+            ],
+          },
+        },
+      }),
+    ]);
+
+    return {
+      cutoffEventId: cutoffEvent.data.id ?? undefined,
+      paymentEventId: paymentEvent.data.id ?? undefined,
+    };
+  } catch {
+    // Calendar creation is optional — never block card creation
+    return {};
+  }
+}
+
+// ==========================================
+// HELPER: Eliminar eventos de calendario de una tarjeta
+// ==========================================
+async function deleteCalendarEvents(userId: string, googleCalendarEventId: string | null) {
+  if (!googleCalendarEventId) return;
+  const calendar = await getGoogleCalendarClient(userId);
+  if (!calendar) return;
+
+  try {
+    const ids = JSON.parse(googleCalendarEventId) as {
+      cutoffEventId?: string;
+      paymentEventId?: string;
+    };
+    await Promise.allSettled([
+      ids.cutoffEventId &&
+        calendar.events.delete({ calendarId: 'primary', eventId: ids.cutoffEventId }),
+      ids.paymentEventId &&
+        calendar.events.delete({ calendarId: 'primary', eventId: ids.paymentEventId }),
+    ]);
+  } catch {
+    // Silently ignore errors
+  }
 }
 
 // ==========================================
@@ -388,6 +521,8 @@ export async function createCreditCard(data: {
   creditLimit: number;
   cutOffDate: number;
   paymentDate: number;
+  color?: string;
+  cuotaManejo?: number;
 }) {
   const userId = await getAuthUserId();
 
@@ -399,10 +534,27 @@ export async function createCreditCard(data: {
       cutOffDate: data.cutOffDate,
       paymentDate: data.paymentDate,
       currentDebt: 0,
+      color: data.color ?? '#ffd700',
+      cuotaManejo: data.cuotaManejo ?? 0,
     },
   });
 
-  return { card };
+  // Agendar eventos en Google Calendar (no bloquea la creación)
+  const calendarEventIds = await createCalendarEvents(userId, {
+    name: card.name,
+    cutOffDate: card.cutOffDate,
+    paymentDate: card.paymentDate,
+  });
+
+  let finalCard = card;
+  if (calendarEventIds.cutoffEventId || calendarEventIds.paymentEventId) {
+    finalCard = await prisma.creditCard.update({
+      where: { id: card.id },
+      data: { googleCalendarEventId: JSON.stringify(calendarEventIds) },
+    });
+  }
+
+  return { card: finalCard };
 }
 
 // ==========================================
@@ -512,7 +664,60 @@ export async function deleteCreditCard(cardId: string) {
   });
   if (!card) throw new Error('Tarjeta no encontrada');
 
+  // Limpiar eventos de Google Calendar (silencioso si falla)
+  await deleteCalendarEvents(userId, card.googleCalendarEventId ?? null);
+
   await prisma.creditCard.delete({ where: { id: cardId } });
 
   return { success: true };
+}
+
+// ==========================================
+// POST: Avance de tarjeta de crédito → Liquidez
+// ==========================================
+export async function transferCreditToLiquid(data: {
+  creditCardId: string;
+  amount: number;
+}) {
+  const userId = await getAuthUserId();
+
+  const card = await prisma.creditCard.findFirst({
+    where: { id: data.creditCardId, userId },
+  });
+  if (!card) throw new Error('Tarjeta no encontrada');
+
+  const available = card.creditLimit - card.currentDebt;
+  if (data.amount > available) {
+    throw new Error(`Cupo insuficiente. Disponible: $${available.toLocaleString()}`);
+  }
+
+  const profile = await prisma.userProfile.findUnique({ where: { userId } });
+  if (!profile) throw new Error('Perfil no encontrado');
+
+  const [updatedCard, updatedProfile, avanceTx] = await prisma.$transaction([
+    prisma.creditCard.update({
+      where: { id: data.creditCardId },
+      data: { currentDebt: card.currentDebt + data.amount },
+    }),
+    prisma.userProfile.update({
+      where: { userId },
+      data: { liquidBalance: profile.liquidBalance + data.amount },
+    }),
+    prisma.walletTransaction.create({
+      data: {
+        userId,
+        amount: data.amount,
+        type: 'IN',
+        description: `Avance tarjeta ${card.name}`,
+        source: 'CREDIT_CARD',
+        creditCardId: data.creditCardId,
+      },
+    }),
+  ]);
+
+  return {
+    card: updatedCard,
+    liquidBalance: updatedProfile.liquidBalance,
+    transaction: avanceTx,
+  };
 }

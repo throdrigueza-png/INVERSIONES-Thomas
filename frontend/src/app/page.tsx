@@ -25,6 +25,7 @@ import {
   registerCreditExpense,
   payCreditCard,
   deleteCreditCard,
+  transferCreditToLiquid,
 } from "@/app/actions";
 
 // ==========================================
@@ -50,6 +51,8 @@ interface CreditCard {
   cutOffDate: number;
   paymentDate: number;
   currentDebt: number;
+  color: string;
+  cuotaManejo: number;
 }
 
 // Inversiones (Pasivas, Activas, Dafuturo, ETFs)
@@ -138,7 +141,10 @@ export default function ThomasCorpApp() {
   const [ccLimit, setCCLimit] = useState("");
   const [ccCutOff, setCCCutOff] = useState("15");
   const [ccPayment, setCCPayment] = useState("25");
+  const [ccColor, setCCColor] = useState("#ffd700");
+  const [ccCuotaManejo, setCCCuotaManejo] = useState("0");
   const [ccPayAmounts, setCCPayAmounts] = useState<Record<string, string>>({});
+  const [ccAdvanceAmounts, setCCAdvanceAmounts] = useState<Record<string, string>>({});
 
   // Controles del Módulo de Inversiones (FAB y Modal)
   const [isFabOpen, setIsFabOpen] = useState(false);
@@ -192,7 +198,16 @@ export default function ThomasCorpApp() {
             })),
           }))
         );
-        setCreditCards(data.creditCards);
+        setCreditCards(data.creditCards.map((c) => ({
+          id: c.id,
+          name: c.name,
+          creditLimit: c.creditLimit,
+          cutOffDate: c.cutOffDate,
+          paymentDate: c.paymentDate,
+          currentDebt: c.currentDebt,
+          color: c.color ?? '#ffd700',
+          cuotaManejo: c.cuotaManejo ?? 0,
+        })));
       })
       .catch(console.error)
       .finally(() => setIsDataLoading(false));
@@ -206,8 +221,12 @@ export default function ThomasCorpApp() {
     return investments.reduce((sum, inv) => sum + inv.currentAmount, 0);
   }, [investments]);
 
-  // EL CAPITAL NETO INTOCABLE
-  const NET_CAPITAL = liquidWallet + totalInvestedValue;
+  const totalCreditAvailable = useMemo(() => {
+    return creditCards.reduce((sum, c) => sum + (c.creditLimit - c.currentDebt), 0);
+  }, [creditCards]);
+
+  // PODER DE GASTO TOTAL: Liquidez + Inversiones + Cupo disponible
+  const TOTAL_SPENDING_POWER = liquidWallet + totalInvestedValue + totalCreditAvailable;
 
   // ==========================================
   // ⚙️ 6. LÓGICA DE NEGOCIO (BILLETERA E INVERSIONES)
@@ -445,13 +464,19 @@ export default function ThomasCorpApp() {
         creditLimit: limit,
         cutOffDate: Number(ccCutOff),
         paymentDate: Number(ccPayment),
+        color: ccColor,
+        cuotaManejo: parseSmartAmount(ccCuotaManejo) || 0,
       });
-      setCreditCards((prev) => [...prev, result.card]);
+      setCreditCards((prev) => [...prev, {
+        ...result.card,
+        color: result.card.color ?? '#ffd700',
+        cuotaManejo: result.card.cuotaManejo ?? 0,
+      }]);
     } catch (e: unknown) {
       alert(e instanceof Error ? e.message : "Error creando tarjeta");
     }
     setIsCCModalOpen(false);
-    setCCName(""); setCCLimit(""); setCCCutOff("15"); setCCPayment("25");
+    setCCName(""); setCCLimit(""); setCCCutOff("15"); setCCPayment("25"); setCCColor("#ffd700"); setCCCuotaManejo("0");
   };
 
   const handlePayCreditCard = async (cardId: string) => {
@@ -490,6 +515,32 @@ export default function ThomasCorpApp() {
     }
   };
 
+  const handleTransferCreditToLiquid = async (cardId: string) => {
+    const amount = parseSmartAmount(ccAdvanceAmounts[cardId] ?? "");
+    if (!amount || amount <= 0) return;
+    try {
+      const result = await transferCreditToLiquid({ creditCardId: cardId, amount });
+      setLiquidWallet(result.liquidBalance);
+      setCreditCards((prev) =>
+        prev.map((c) => (c.id === cardId ? { ...c, currentDebt: result.card.currentDebt } : c))
+      );
+      const tx = result.transaction;
+      const advanceTx: WalletTransaction = {
+        id: tx.id,
+        amount: tx.amount,
+        type: "IN",
+        description: tx.description,
+        date: tx.date instanceof Date ? tx.date.toISOString() : String(tx.date),
+        source: "CREDIT_CARD",
+        creditCardId: cardId,
+      };
+      setTransactions((prev) => [advanceTx, ...prev]);
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : "Error procesando avance");
+    }
+    setCCAdvanceAmounts((prev) => ({ ...prev, [cardId]: "" }));
+  };
+
   // ==========================================
   // 🤖 LÓGICA DEL ASISTENTE IA
   // ==========================================
@@ -521,7 +572,7 @@ export default function ThomasCorpApp() {
     { name: 'Ene', neto: 900000, gastos: 150000 },
     { name: 'Feb', neto: 1050000, gastos: 120000 },
     { name: 'Mar', neto: 1120000, gastos: 200000 },
-    { name: 'Abr', neto: NET_CAPITAL, gastos: transactions.filter(t => t.type === 'OUT').reduce((s, t) => s + t.amount, 0) },
+    { name: 'Abr', neto: TOTAL_SPENDING_POWER, gastos: transactions.filter(t => t.type === 'OUT').reduce((s, t) => s + t.amount, 0) },
   ];
 
   const comparativeData = investments.map(inv => ({
@@ -655,6 +706,7 @@ export default function ThomasCorpApp() {
                 data={[
                   { name: "Liquidez", value: liquidWallet, fill: "#7000ff" },
                   ...investments.map(inv => ({ name: inv.name, value: inv.currentAmount, fill: inv.color })),
+                  ...(creditCards.length > 0 ? [{ name: "Deuda Crédito", value: creditCards.reduce((s, c) => s + c.currentDebt, 0), fill: "#ff0055" }] : []),
                 ].filter(d => d.value > 0)}
                 cx="50%"
                 cy="50%"
@@ -673,31 +725,68 @@ export default function ThomasCorpApp() {
           </ResponsiveContainer>
         </div>
 
-        {/* RECOMENDACIONES */}
-        <div className="bg-[#0A0A16]/90 border border-white/10 p-6 rounded-2xl">
-          <h3 className="text-xs text-gray-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-            <Zap size={14} className="text-[#ffd700]" /> Radar de Oportunidades
-          </h3>
-          <div className="space-y-3">
-            {[
-              { icon: "🏆", title: "S&P 500 (SPY)", desc: "Históricamente +10% anual promedio. Base sólida para cualquier portafolio.", tag: "ETF Seguro" },
-              { icon: "⚡", title: "NVIDIA (NVDA)", desc: "Líder indiscutible en chips para IA. Alto riesgo, altísima recompensa.", tag: "Alto Potencial" },
-              { icon: "🔒", title: "Dafuturo (CDT a la vista)", desc: "Liquidez inmediata con rentabilidad fija. Ideal para tu fondo de emergencia.", tag: "Inversión Pasiva" },
-              { icon: "🌍", title: "VWO (Emergentes)", desc: "Mercados en crecimiento: India, China, Brasil. Diversificación global.", tag: "Diversificación" },
-            ].map((rec, i) => (
-              <div key={i} className="flex gap-3 p-3 rounded-xl bg-[#05050A] border border-white/5 hover:border-white/10 transition-all">
-                <span className="text-xl">{rec.icon}</span>
-                <div className="flex-1 min-w-0">
-                  <div className="flex justify-between items-start">
-                    <p className="text-xs font-bold text-white">{rec.title}</p>
-                    <span className="text-[8px] px-2 py-0.5 rounded bg-[#7000ff]/20 text-[#7000ff] border border-[#7000ff]/30 whitespace-nowrap ml-2">{rec.tag}</span>
-                  </div>
-                  <p className="text-[10px] text-gray-500 mt-0.5 leading-relaxed">{rec.desc}</p>
-                </div>
-              </div>
-            ))}
+        {/* DEUDA vs LIQUIDEZ CHART */}
+        {creditCards.length > 0 ? (
+          <div className="bg-[#0A0A16]/90 border border-white/10 p-6 rounded-2xl h-[300px]">
+            <h3 className="text-xs text-gray-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+              <CreditCardIcon size={14} className="text-yellow-400" /> Deuda vs Liquidez Real
+            </h3>
+            <ResponsiveContainer width="100%" height="80%">
+              <BarChart
+                data={[
+                  { name: "Liquidez", value: liquidWallet, fill: "#7000ff" },
+                  { name: "Inversiones", value: totalInvestedValue, fill: "#00f0ff" },
+                  { name: "Deuda Crédito", value: creditCards.reduce((s, c) => s + c.currentDebt, 0), fill: "#ff0055" },
+                  { name: "Cupo Disponible", value: creditCards.reduce((s, c) => s + (c.creditLimit - c.currentDebt), 0), fill: "#ffd700" },
+                ].filter(d => d.value > 0)}
+                margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
+                <XAxis dataKey="name" stroke="#ffffff30" fontSize={9} />
+                <YAxis stroke="#ffffff30" fontSize={9} tickFormatter={(v) => `$${v / 1000}k`} />
+                <RechartsTooltip
+                  contentStyle={{ backgroundColor: '#05050A', borderColor: '#333', fontSize: '11px' }}
+                  formatter={(val) => `$${(val as number)?.toLocaleString() ?? String(val)}`}
+                />
+                <Bar dataKey="value" radius={[4, 4, 0, 0]} minPointSize={4}>
+                  {[
+                    { fill: "#7000ff" },
+                    { fill: "#00f0ff" },
+                    { fill: "#ff0055" },
+                    { fill: "#ffd700" },
+                  ].map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.fill} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
           </div>
-        </div>
+        ) : (
+          <div className="bg-[#0A0A16]/90 border border-white/10 p-6 rounded-2xl">
+            <h3 className="text-xs text-gray-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+              <Zap size={14} className="text-[#ffd700]" /> Radar de Oportunidades
+            </h3>
+            <div className="space-y-3">
+              {[
+                { icon: "🏆", title: "S&P 500 (SPY)", desc: "Históricamente +10% anual promedio. Base sólida para cualquier portafolio.", tag: "ETF Seguro" },
+                { icon: "⚡", title: "NVIDIA (NVDA)", desc: "Líder indiscutible en chips para IA. Alto riesgo, altísima recompensa.", tag: "Alto Potencial" },
+                { icon: "🔒", title: "Dafuturo (CDT a la vista)", desc: "Liquidez inmediata con rentabilidad fija. Ideal para tu fondo de emergencia.", tag: "Inversión Pasiva" },
+                { icon: "🌍", title: "VWO (Emergentes)", desc: "Mercados en crecimiento: India, China, Brasil. Diversificación global.", tag: "Diversificación" },
+              ].map((rec, i) => (
+                <div key={i} className="flex gap-3 p-3 rounded-xl bg-[#05050A] border border-white/5 hover:border-white/10 transition-all">
+                  <span className="text-xl">{rec.icon}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex justify-between items-start">
+                      <p className="text-xs font-bold text-white">{rec.title}</p>
+                      <span className="text-[8px] px-2 py-0.5 rounded bg-[#7000ff]/20 text-[#7000ff] border border-[#7000ff]/30 whitespace-nowrap ml-2">{rec.tag}</span>
+                    </div>
+                    <p className="text-[10px] text-gray-500 mt-0.5 leading-relaxed">{rec.desc}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1097,16 +1186,19 @@ export default function ThomasCorpApp() {
               const isUrgentPayment = daysUntilPayment <= 7;
 
               return (
-                <div key={card.id} className="relative bg-gradient-to-br from-[#1a0a2e] to-[#0A0A16] border border-yellow-400/20 rounded-2xl p-5 flex flex-col gap-4 shadow-lg overflow-hidden">
+                <div key={card.id} className="relative rounded-2xl p-5 flex flex-col gap-4 shadow-lg overflow-hidden border" style={{ background: `linear-gradient(135deg, ${card.color}22 0%, #0A0A16 60%)`, borderColor: `${card.color}40`, boxShadow: `0 4px 24px ${card.color}18` }}>
                   {/* Chip decorativo */}
-                  <div className="absolute top-4 right-4 w-8 h-6 rounded bg-yellow-400/20 border border-yellow-400/30 flex items-center justify-center">
-                    <div className="w-5 h-4 rounded-sm bg-yellow-400/40 border border-yellow-400/20" />
+                  <div className="absolute top-4 right-4 w-8 h-6 rounded flex items-center justify-center" style={{ backgroundColor: `${card.color}30`, borderWidth: 1, borderColor: `${card.color}50` }}>
+                    <div className="w-5 h-4 rounded-sm" style={{ backgroundColor: `${card.color}50`, borderWidth: 1, borderColor: `${card.color}30` }} />
                   </div>
 
                   {/* Nombre y header */}
                   <div>
-                    <p className="text-[9px] text-yellow-400/60 uppercase tracking-widest">Tarjeta de Crédito</p>
+                    <p className="text-[9px] uppercase tracking-widest" style={{ color: `${card.color}99` }}>Tarjeta de Crédito</p>
                     <h3 className="text-xl font-black text-white tracking-widest mt-1">{card.name}</h3>
+                    {card.cuotaManejo > 0 && (
+                      <p className="text-[9px] text-gray-500 mt-0.5">Cuota manejo: ${card.cuotaManejo.toLocaleString()}/mes</p>
+                    )}
                   </div>
 
                   {/* Saldos */}
@@ -1191,6 +1283,30 @@ export default function ThomasCorpApp() {
                     </div>
                   )}
 
+                  {/* Avance: pasar crédito a liquidez */}
+                  {available > 0 && (
+                    <div className="flex gap-2 items-center border-t border-white/5 pt-2">
+                      <div className="relative flex-1">
+                        <span className="absolute left-2 top-2 text-gray-500 text-[10px]">$</span>
+                        <input
+                          type="text"
+                          value={ccAdvanceAmounts[card.id] ?? ""}
+                          onChange={(e) => setCCAdvanceAmounts((prev) => ({ ...prev, [card.id]: e.target.value }))}
+                          placeholder={`Avance (máx $${available.toLocaleString()})`}
+                          className="w-full bg-[#05050A] border border-white/10 rounded-lg py-2 pl-5 pr-2 text-[10px] text-white outline-none focus:border-[#00ffaa]/50"
+                        />
+                      </div>
+                      <button
+                        disabled={!ccAdvanceAmounts[card.id] || parseSmartAmount(ccAdvanceAmounts[card.id]) <= 0}
+                        onClick={() => handleTransferCreditToLiquid(card.id)}
+                        className="bg-[#00ffaa]/10 hover:bg-[#00ffaa]/20 border border-[#00ffaa]/30 text-[#00ffaa] px-3 py-2 rounded-lg text-[10px] font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 whitespace-nowrap"
+                        title="Pasar crédito a tu billetera (aumenta tu deuda)"
+                      >
+                        Avance ⚡
+                      </button>
+                    </div>
+                  )}
+
                   {/* Eliminar tarjeta */}
                   <button
                     onClick={() => handleDeleteCreditCard(card.id, card.name)}
@@ -1257,6 +1373,27 @@ export default function ThomasCorpApp() {
                         value={ccPayment}
                         onChange={(e) => setCCPayment(e.target.value)}
                         className="w-full bg-[#05050A] border border-white/10 rounded-lg p-3 text-sm text-white focus:border-yellow-400/50 outline-none mt-1"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[10px] text-gray-500 uppercase">Cuota de Manejo (0 si no aplica)</label>
+                      <input
+                        type="text"
+                        value={ccCuotaManejo}
+                        onChange={(e) => setCCCuotaManejo(e.target.value)}
+                        placeholder="Ej: 15 = $15.000"
+                        className="w-full bg-[#05050A] border border-white/10 rounded-lg p-3 text-sm text-white focus:border-yellow-400/50 outline-none mt-1"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-500 uppercase">Color de la tarjeta</label>
+                      <input
+                        type="color"
+                        value={ccColor}
+                        onChange={(e) => setCCColor(e.target.value)}
+                        className="w-full h-[46px] bg-[#05050A] border border-white/10 rounded-lg p-1 mt-1 cursor-pointer"
                       />
                     </div>
                   </div>
@@ -1530,12 +1667,12 @@ export default function ThomasCorpApp() {
 
           {/* AQUÍ ESTÁ EL TOTAL: Suma de la billetera + inversiones */}
           <div className="text-right sm:ml-auto">
-            <h2 className="text-[10px] text-gray-500 uppercase tracking-widest">Capital Neto (Intocable)</h2>
+            <h2 className="text-[10px] text-gray-500 uppercase tracking-widest">Poder de Gasto Total</h2>
             {isDataLoading ? (
               <Loader2 size={28} className="text-[#00f0ff] animate-spin ml-auto mt-1" />
             ) : (
               <p className="text-2xl sm:text-3xl md:text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-[#00f0ff] to-[#7000ff]">
-                ${NET_CAPITAL.toLocaleString()}
+                ${TOTAL_SPENDING_POWER.toLocaleString()}
               </p>
             )}
           </div>
